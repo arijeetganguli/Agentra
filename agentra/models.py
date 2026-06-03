@@ -408,6 +408,28 @@ CAPABILITY_FALLBACK_CHAINS: dict[str, dict[str, list[str]]] = {
 }
 
 
+# ── RouteSmith-style routing result ─────────────────────────────────────────
+
+class TaskComplexity(enum.StrEnum):
+    LOW = "low"        # simple completions, formatting, Q&A
+    MEDIUM = "medium"  # standard feature work, unit tests
+    HIGH = "high"      # architecture, security review, cross-file analysis
+
+
+class RouteResult(BaseModel):
+    """Result of classifying a task and routing it to the best model."""
+    task_preview: str                       # first 120 chars of the original task
+    purpose: str                            # e.g. "coding", "planning"
+    capability_class: str                   # e.g. "deep_reasoning", "coding"
+    complexity: TaskComplexity
+    scores: dict[str, float] = Field(default_factory=dict)  # per-purpose signal scores
+    models: dict[str, str] = Field(default_factory=dict)    # platform → recommended model
+    rationale: str = ""                     # human-readable explanation
+
+    def best_model(self, platform: str = "copilot") -> str:
+        return self.models.get(platform, "")
+
+
 def resolve_model_with_fallback(
     platform: str,
     capability_class: str,

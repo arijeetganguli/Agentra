@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -11,6 +12,93 @@ from agentra.optimizer.engine import TokenOptimizer
 
 if TYPE_CHECKING:
     from agentra.rag.engine import CodeRAGEngine
+
+# ── Merge helpers ─────────────────────────────────────────────────────────────
+
+# Section headings owned and managed by Agentra.
+# When merging, these are always replaced with fresh generated content.
+# Any other ## heading in an existing file is treated as user content and preserved.
+_AGENTRA_SECTIONS: frozenset[str] = frozenset({
+    "Model Preference",
+    "Karpathy Coding Guidelines (Universal — All Code Writing)",
+    "Detected Stack",
+    "Testing Requirements",
+    "Security & Governance",
+    "Codebase Patterns (auto-indexed)",
+    "Agentra Code Intelligence (RAG + Knowledge Graph)",
+    "Active Skills",
+    "Execution Safety",
+})
+
+_SECTION_RE = re.compile(r'^(## [^\n]+)', re.MULTILINE)
+
+
+def _parse_md_sections(content: str) -> list[tuple[str | None, str]]:
+    """Split markdown into (heading_line | None, body) pairs.
+
+    None heading means preamble (content before the first ## heading).
+    """
+    parts = _SECTION_RE.split(content)
+    result: list[tuple[str | None, str]] = [(None, parts[0])]
+    for i in range(1, len(parts), 2):
+        heading = parts[i]
+        body = parts[i + 1] if i + 1 < len(parts) else ""
+        result.append((heading, body))
+    return result
+
+
+def merge_instruction_content(existing: str, new_content: str) -> str:
+    """Merge freshly generated Agentra content into an existing instruction file.
+
+    Rules:
+    - Agentra-owned sections (listed in ``_AGENTRA_SECTIONS``) are always
+      replaced with the new generated content.
+    - Any other ``## `` sections found in the existing file are treated as
+      user-added and are preserved verbatim, in their original position.
+    - New Agentra sections that do not yet exist in the file are appended at
+      the end so that user sections are never displaced.
+    - The preamble (lines before the first ``## `` heading) is always replaced
+      with the new Agentra header.
+    """
+    existing_secs = _parse_md_sections(existing)
+    new_secs = _parse_md_sections(new_content)
+
+    # Index new Agentra sections by title for fast lookup
+    new_preamble = ""
+    new_by_title: dict[str, tuple[str, str]] = {}
+    for heading, body in new_secs:
+        if heading is None:
+            new_preamble = body
+        else:
+            title = heading[3:].strip()  # strip leading "## "
+            new_by_title[title] = (heading, body)
+
+    merged: list[str] = []
+    replaced_titles: set[str] = set()
+
+    for heading, body in existing_secs:
+        if heading is None:
+            # Always use fresh Agentra preamble
+            merged.append(new_preamble)
+            continue
+        title = heading[3:].strip()
+        if title in _AGENTRA_SECTIONS and title in new_by_title:
+            new_heading, new_body = new_by_title[title]
+            merged.append(new_heading + new_body)
+            replaced_titles.add(title)
+        else:
+            # User-added section — keep as-is
+            merged.append(heading + body)
+
+    # Append any new Agentra sections that weren't in the existing file
+    for heading, body in new_secs:
+        if heading is None:
+            continue
+        title = heading[3:].strip()
+        if title in _AGENTRA_SECTIONS and title not in replaced_titles:
+            merged.append(heading + body)
+
+    return "".join(merged)
 
 
 class AgentAdapter(Protocol):
@@ -94,9 +182,35 @@ def _build_stack_block(stack: StackProfile) -> str:
 def _build_skills_block(config: ProjectConfig) -> str:
     if not config.skills:
         return ""
-    lines = ["## Active Skills"]
-    for s in config.skills:
-        lines.append(f"- {s}")
+
+    from agentra.skills.registry import SkillRegistry
+    registry = SkillRegistry()
+
+    lines = [
+        "## Active Skills",
+        "",
+        "Skills are agent-invokable — load targeted guidance on demand instead of "
+        "embedding all content up-front.",
+        "",
+        "| Skill | Copilot | Claude Code | Description |",
+        "|-------|---------|-------------|-------------|",
+    ]
+    for skill_id in config.skills:
+        skill = registry.get(skill_id)
+        if skill is None:
+            lines.append(f"| {skill_id} | — | — | (custom) |")
+            continue
+        copilot_ref = f"`#{skill_id}`"
+        claude_ref = f"`/skill {skill_id}`"
+        lines.append(f"| **{skill_id}** | {copilot_ref} | {claude_ref} | {skill.description} |")
+
+    lines += [
+        "",
+        "> Skill files live in `.github/prompts/<skill>.prompt.md` (Copilot) and "
+        "`.claude/skills/<skill>/SKILL.md` (Claude Code).",
+        "> Regenerate with: `ag skills generate`",
+        "",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -189,6 +303,90 @@ def _build_model_block(platform_value: str, config: ProjectConfig) -> str:
             f"- To override: `ag model set {platform_value} <model> --purpose <purpose>`"
         )
 
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _build_routing_block(platform_value: str, config: ProjectConfig) -> str:
+    """Emit a RouteSmith-style decision table so the agent self-selects the right model.
+
+    The table maps each task signal group to the best capability model for this platform.
+    Agents that support dynamic model switching (Claude, Aider) should switch automatically.
+    Agents on host-controlled platforms (Copilot, Cursor) should declare the intended model
+    and let the user apply it via the IDE model picker.
+    """
+    from agentra.models import (
+        CAPABILITY_MODELS,
+        PURPOSE_CAPABILITY_MAP,
+    )
+    from agentra.routing.engine import build_routing_table
+
+    cap_models = CAPABILITY_MODELS.get(platform_value)
+    if not cap_models:
+        return ""
+
+    table = build_routing_table(platform_value, config)
+    if not table:
+        return ""
+
+    _host_controlled = {"copilot", "cursor", "windsurf"}
+
+    # Group purposes by capability class for a compact table
+    _PURPOSE_SIGNALS: dict[str, str] = {
+        "planning":      '"design", "architect", "plan", "how should", "roadmap"',
+        "reasoning":     '"analyze", "why", "compare", "evaluate", "tradeoff"',
+        "review":        '"review", "audit", "security", "vulnerability", "bug"',
+        "coding":        '"implement", "write", "build", "fix", "create"',
+        "testing":       '"test", "spec", "mock", "pytest", "coverage"',
+        "refactoring":   '"refactor", "clean up", "simplify", "extract"',
+        "documentation": '"document", "docstring", "readme", "explain"',
+        "general":       "catch-all / no strong signal",
+        "formatting":    '"format", "lint", "indent", "style"',
+    }
+
+    _PURPOSE_LABELS: dict[str, str] = {
+        "planning":      "Planning / Architecture",
+        "reasoning":     "Reasoning / Analysis",
+        "review":        "Code Review / Security Audit",
+        "coding":        "Implementation / Bug Fix",
+        "testing":       "Testing / QA",
+        "refactoring":   "Refactoring / Cleanup",
+        "documentation": "Documentation",
+        "general":       "General / Default",
+        "formatting":    "Formatting / Style",
+    }
+
+    lines = [
+        "## Smart Model Routing (RouteSmith Mode)",
+        "",
+        "Agentra classifies each request and routes to the best model. "
+        "Use the table below to select the right model **before** responding:",
+        "",
+        "| Task Type | Key Signals | Best Model | Capability |",
+        "|-----------|-------------|------------|------------|",
+    ]
+
+    seen_cap_models: dict[str, str] = {}  # capability_class → model (to deduplicate table)
+    for purpose, model in table.items():
+        label = _PURPOSE_LABELS.get(purpose, purpose.capitalize())
+        signals = _PURPOSE_SIGNALS.get(purpose, "")
+        cap_class = PURPOSE_CAPABILITY_MAP.get(purpose, "balanced")
+        lines.append(f"| {label} | {signals} | `{model}` | {cap_class} |")
+
+    lines.append("")
+    if platform_value in _host_controlled:
+        lines.append(
+            "**Before responding**: identify the task type from the table above, "
+            "then state: _\"Using `<model>` for <task-type>.\"_ "
+            "If the active model differs, prompt the user to switch via the IDE model picker. "
+            "Run `ag route \"<task>\"` locally for Agentra's classification."
+        )
+    else:
+        lines.append(
+            "**Before responding**: identify the task type, switch to the indicated model, "
+            "then state: _\"Switched to `<model>` for <task-type>.\"_ "
+            "Run `ag route \"<task>\"` for Agentra's live classification."
+        )
     lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -342,6 +540,7 @@ class ClaudeAdapter:
         parts = [
             _build_header("Claude Code (CLAUDE.md)"),
             _build_model_block(AgentPlatform.CLAUDE.value, config),
+            _build_routing_block(AgentPlatform.CLAUDE.value, config),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
@@ -364,6 +563,7 @@ class CursorAdapter:
         parts = [
             _build_header("Cursor (.cursorrules)"),
             _build_model_block(AgentPlatform.CURSOR.value, config),
+            _build_routing_block(AgentPlatform.CURSOR.value, config),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
@@ -386,6 +586,7 @@ class CopilotAdapter:
         parts = [
             _build_header("GitHub Copilot"),
             _build_model_block(AgentPlatform.COPILOT.value, config),
+            _build_routing_block(AgentPlatform.COPILOT.value, config),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
@@ -408,6 +609,7 @@ class AiderAdapter:
         parts = [
             _build_header("Aider (.aider.conf.yml)"),
             _build_model_block(AgentPlatform.AIDER.value, config),
+            _build_routing_block(AgentPlatform.AIDER.value, config),
             _build_stack_block(stack),
             _build_testing_block(stack),
             _build_security_block(governance, optimizer),
@@ -433,6 +635,7 @@ class WindsurfAdapter:
         parts = [
             _build_header("Windsurf"),
             _build_model_block(AgentPlatform.WINDSURF.value, config),
+            _build_routing_block(AgentPlatform.WINDSURF.value, config),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
@@ -525,12 +728,22 @@ def generate_for_agents(
     return outputs
 
 
-def write_agent_files(output_dir: Path, files: dict[str, str]) -> list[Path]:
-    """Write generated agent files to disk."""
+def write_agent_files(output_dir: Path, files: dict[str, str], *, merge: bool = True) -> list[Path]:
+    """Write generated agent files to disk.
+
+    When *merge* is ``True`` (the default) and a markdown file already exists,
+    Agentra-owned sections are updated while user-added sections are preserved.
+    Non-markdown files (e.g. ``.aider.conf.yml``, ``.continue/config.json``)
+    are always overwritten because they use structured formats incompatible
+    with the text-diff merge strategy.
+    """
     written: list[Path] = []
     for rel_path, content in files.items():
         fp = output_dir / rel_path
         fp.parent.mkdir(parents=True, exist_ok=True)
+        if merge and fp.exists() and rel_path.endswith(".md"):
+            existing = fp.read_text(encoding="utf-8")
+            content = merge_instruction_content(existing, content)
         fp.write_text(content, encoding="utf-8")
         written.append(fp)
     return written

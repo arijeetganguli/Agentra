@@ -1408,6 +1408,233 @@ def model_cmd(
         raise typer.Exit(1)
 
 
+# ── ag skills ─────────────────────────────────────────────────────────────────
+
+@app.command(name="skills")
+def skills_cmd(
+    action: str = typer.Argument("list", help="Action: list, generate"),
+    path: str = typer.Option(None, "--path", "-p", help="Project root (default: cwd)"),
+    skill_ids: str = typer.Option(
+        None, "--skills", "-s",
+        help="Comma-separated skill IDs to generate (default: all active skills from config)",
+    ),
+    no_copilot: bool = typer.Option(False, "--no-copilot", help="Skip Copilot .prompt.md files"),
+    no_claude: bool = typer.Option(False, "--no-claude", help="Skip Claude Code SKILL.md files"),
+    format: str = typer.Option("table", "--format", "-f", help="Output format for list: table, json"),
+):
+    """List or generate agent-invokable skill prompt files.
+
+    Examples:
+
+      ag skills list
+
+      ag skills generate
+
+      ag skills generate --skills fastapi,postgresql
+
+      ag skills generate --no-claude
+    """
+    import json as _json
+
+    from agentra.models import Skill
+    from agentra.onboarding.engine import load_config
+    from agentra.skills.prompts import SkillPromptGenerator
+    from agentra.skills.registry import BUILTIN_SKILLS, SkillRegistry
+
+    root = _resolve_root(path)
+    registry = SkillRegistry()
+
+    if action == "list":
+        config = load_config(root)
+        active_ids: set[str] = set(config.skills) if config else set()
+
+        if format == "json":
+            out = []
+            for sid, skill in BUILTIN_SKILLS.items():
+                out.append({
+                    "id": sid,
+                    "name": skill.name,
+                    "description": skill.description,
+                    "stacks": skill.stacks,
+                    "active": sid in active_ids,
+                })
+            print(_json.dumps(out, indent=2))
+            return
+
+        table = Table(title="Available Skills", show_header=True)
+        table.add_column("ID", style="cyan")
+        table.add_column("Name")
+        table.add_column("Description")
+        table.add_column("Stacks", style="dim")
+        table.add_column("Active", justify="center")
+        for sid, skill in BUILTIN_SKILLS.items():
+            active_marker = "[green]✓[/]" if sid in active_ids else ""
+            table.add_row(sid, skill.name, skill.description, ", ".join(skill.stacks), active_marker)
+        console.print(table)
+
+        if active_ids:
+            console.print(
+                f"\n[dim]{len(active_ids)} active skill(s). "
+                "Generate prompt files with: [bold]ag skills generate[/][/]"
+            )
+        else:
+            console.print(
+                "\n[dim]No active skills. Run [bold]ag init[/] first, "
+                "then [bold]ag skills generate[/].[/]"
+            )
+
+    elif action == "generate":
+        # Resolve which skills to generate
+        if skill_ids:
+            ids = [s.strip() for s in skill_ids.split(",") if s.strip()]
+        else:
+            config = load_config(root)
+            if config is None:
+                console.print("[red]No Agentra config found.[/] Run [bold]ag init[/] first.")
+                raise typer.Exit(1)
+            ids = config.skills
+
+        if not ids:
+            console.print(
+                "[yellow]No skills configured.[/] "
+                "Add skills to .agentra.yml or pass --skills <id,...>"
+            )
+            raise typer.Exit(0)
+
+        # Resolve skill objects
+        skills: list[Skill] = []
+        unknown: list[str] = []
+        for sid in ids:
+            skill = registry.get(sid)
+            if skill is None:
+                unknown.append(sid)
+            else:
+                skills.append(skill)
+
+        if unknown:
+            console.print(f"[yellow]Unknown skill(s) skipped:[/] {', '.join(unknown)}")
+
+        if not skills:
+            console.print("[red]No valid skills to generate.[/]")
+            raise typer.Exit(1)
+
+        generator = SkillPromptGenerator()
+        written = generator.generate(
+            skills,
+            root,
+            copilot=not no_copilot,
+            claude=not no_claude,
+        )
+
+        console.print(f"\n[green]✓[/] Generated {len(written)} skill file(s):")
+        for fp in written:
+            console.print(f"  • {fp.relative_to(root)}")
+
+        console.print(
+            "\n[dim]Copilot: type [bold]#<skill>[/] in chat to load a skill.[/]\n"
+            "[dim]Claude Code: type [bold]/skill <skill>[/] to activate.[/]"
+        )
+
+    else:
+        console.print(f"[red]Unknown action '{action}'.[/] Use: list, generate")
+        raise typer.Exit(1)
+
+
+# ── ag route ──────────────────────────────────────────────────────────────────
+
+@app.command(name="route")
+def route_cmd(
+    task: str = typer.Argument(..., help="Task description to classify and route"),
+    path: str = typer.Option(None, "--path", "-p", help="Project root (default: cwd)"),
+    platform: str = typer.Option(
+        None, "--platform", help="Limit output to one platform (e.g. copilot, claude)"
+    ),
+    format: str = typer.Option("table", "--format", "-f", help="Output format: table, json"),
+):
+    """Classify a task and show the best model per agent platform.
+
+    RouteSmith mode — instead of letting auto-pick choose any model, Agentra
+    classifies the task and routes to the capability-matched model.
+
+    Examples:
+
+      ag route "implement a distributed caching layer with Redis"
+
+      ag route "design the authentication system architecture" --platform copilot
+
+      ag route "write unit tests for the payment module" --format json
+
+      ag route "review this code for security vulnerabilities" --platform claude
+    """
+    import json as _json
+
+    from agentra.models import CAPABILITY_MODELS
+    from agentra.onboarding.engine import load_config
+    from agentra.routing.engine import TaskRouter
+
+    root = _resolve_root(path)
+    config = load_config(root)
+
+    router = TaskRouter()
+
+    platforms = None
+    if platform:
+        if platform not in CAPABILITY_MODELS:
+            known = ", ".join(CAPABILITY_MODELS.keys())
+            console.print(f"[red]Unknown platform '{platform}'.[/] Known: {known}")
+            raise typer.Exit(1)
+        platforms = [platform]
+
+    result = router.route(task, platforms=platforms, config=config)
+
+    if format == "json":
+        print(_json.dumps(result.model_dump(), indent=2))
+        return
+
+    # ── Rich table output ─────────────────────────────────────────────────────
+    _COMPLEXITY_COLOR = {
+        "low": "green",
+        "medium": "yellow",
+        "high": "red",
+    }
+    complexity_color = _COMPLEXITY_COLOR.get(result.complexity.value, "white")
+
+    console.print()
+    console.print(
+        f"[bold]Task:[/] {result.task_preview}"
+        + ("…" if len(task) > 120 else "")
+    )
+    console.print(
+        f"[bold]Purpose:[/]          [cyan]{result.purpose}[/]  →  "
+        f"[bold]Capability:[/] [magenta]{result.capability_class}[/]  │  "
+        f"[bold]Complexity:[/] [{complexity_color}]{result.complexity.value}[/]"
+    )
+    console.print(f"[dim]{result.rationale}[/]")
+    console.print()
+
+    if result.models:
+        tbl = Table(title="Recommended Models", show_header=True, box=None)
+        tbl.add_column("Platform", style="cyan", width=14)
+        tbl.add_column("Best Model", style="bold")
+        tbl.add_column("Capability Class", style="dim")
+        from agentra.models import PURPOSE_CAPABILITY_MAP
+        cap = PURPOSE_CAPABILITY_MAP.get(result.purpose, "balanced")
+        for plt, mdl in sorted(result.models.items()):
+            tbl.add_row(plt, mdl, cap)
+        console.print(tbl)
+
+    # Top signal scores
+    top_scores = sorted(result.scores.items(), key=lambda x: x[1], reverse=True)[:4]
+    if any(s > 0 for _, s in top_scores):
+        console.print()
+        score_parts = [
+            f"{p}={s:.1f}" for p, s in top_scores if s > 0
+        ]
+        console.print(f"[dim]Signal scores: {', '.join(score_parts)}[/]")
+
+    console.print()
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

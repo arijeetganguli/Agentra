@@ -7,7 +7,7 @@
 Secure, govern, route, and optimize AI coding agents — automatically.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-211%20passed-3fb950)](tests/)
+[![Tests](https://img.shields.io/badge/tests-288%20passed-3fb950)](tests/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -18,7 +18,7 @@ Agentra is a DevSecOps control plane for AI coding assistants. It auto-detects y
 
 <table>
 <tr><td><strong>40+</strong> Technologies Detected</td><td><strong>32</strong> Security Policies</td><td><strong>14</strong> Built-in Skills</td></tr>
-<tr><td><strong>8</strong> Agent Platforms</td><td><strong>5</strong> Compliance Frameworks</td><td><strong>19</strong> CLI Commands</td></tr>
+<tr><td><strong>8</strong> Agent Platforms</td><td><strong>5</strong> Compliance Frameworks</td><td><strong>22</strong> CLI Commands</td></tr>
 </table>
 
 ## Quick Start
@@ -50,6 +50,15 @@ ag plugin
 
 # Run benchmarks and generate reports
 ag benchmark
+
+# List available skills and generate agent-invokable prompt files
+ag skills list
+ag skills generate
+
+# Classify a task and route to the best model (RouteSmith mode)
+ag route "implement a distributed caching layer with Redis"
+ag route "design the authentication system architecture" --platform copilot
+ag route "review this code for security vulnerabilities" --format json
 ```
 
 ## Features
@@ -62,9 +71,9 @@ ag benchmark
 | 🚦 **Pre-Build Security Gates** | Block builds on CRITICAL findings; CI templates for GitHub Actions, GitLab CI, and generic shell |
 | 🪝 **Git Hooks** | Auto-install pre-commit (OWASP scan) and pre-push (full scan) hooks with clean install/uninstall |
 | 🔌 **Claude Code Plugin** | Distributable plugin package with PreToolUse hook, 4 skills, and Karpathy coding guidelines |
-| 🧩 **Skills System** | 14 domain skills (FastAPI, Terraform, K8s, Spark, Airflow, PostgreSQL, Snowflake, dbt, Kafka, OpenAI, LangChain, MCP, Databricks, Karpathy) |
+| 🧩 **Skills System** | 14 domain skills materialized as agent-invokable `.prompt.md` (Copilot) and `SKILL.md` (Claude Code) files — load guidance on demand instead of bloating every instruction file |
 | 📦 **Token Optimization** | Deduplicate, prioritize, compress, and budget-fit instructions — 30-60% token savings |
-| 🤖 **Smart Model Routing** | Capability-class routing selects the best model per purpose (planning/coding/review/…) across 8 platforms. `--interactive` menu for restricted environments, `--auto-fallback` for enterprise model restrictions, `ag model detect` to identify active models from env vars and settings files |
+| 🤖 **Smart Model Routing** | RouteSmith-style dynamic task classification routes each request to the capability-matched model. `TaskClassifier` scores 9 purpose categories with weighted keyword signals; high-complexity tasks auto-upgrade to `deep_reasoning`. Decision tables injected into all agent instruction files. `ag route "<task>"` for live classification. |
 | 🔌 **Agent Adapters** | Native instruction files for Claude, Cursor, Copilot, Aider, Windsurf, Continue.dev, Roo Code, and universal AGENTS.md |
 | ⚙ **Execution Safety** | Risk-classify commands, block destructive patterns, sandbox with approval gates, dry-run mode |
 | ✓ **Compliance** | Map violations to SOC2, ISO27001, PCI DSS, HIPAA, NIST frameworks |
@@ -96,6 +105,12 @@ ag benchmark
 | `ag model set <agent> <model> --auto-fallback` | Auto-select next best model if the requested one is unavailable |
 | `ag model detect` | Probe env vars & settings files to identify the active model per platform |
 | `ag graph` | Generate interactive HTML call-graph visualization from the code knowledge graph |
+| `ag skills list` | List all built-in skills with active status |
+| `ag skills generate` | Generate agent-invokable prompt files for active skills |
+| `ag skills generate --skills <ids>` | Generate prompt files for specific skill IDs |
+| `ag route "<task>"` | Classify a task and show the best model per platform (RouteSmith mode) |
+| `ag route "<task>" --platform <p>` | Route for a single platform (e.g. `copilot`, `claude`) |
+| `ag route "<task>" --format json` | Machine-readable routing decision |
 | `ag audit` | View local audit log of all Agentra actions |
 | `ag doctor` | Health check: verify config, agent files, .gitignore |
 | `ag version` | Display version |
@@ -165,6 +180,21 @@ ag model set claude some-model --auto-fallback  # Auto-pick next best if restric
 # Detect which model is currently active (reads env vars + settings files)
 ag model detect
 
+# RouteSmith — classify a task and route it to the best model
+ag route "implement a REST endpoint for user auth"
+# Purpose: coding  │ Capability: coding  │ Complexity: medium
+# Recommended Models:
+#   copilot  →  gpt-5.3-codex
+#   claude   →  claude-sonnet-4-6
+#   cursor   →  gpt-5.3-codex
+
+ag route "architect a distributed event-driven payment system" --platform copilot
+# Purpose: planning  │ Capability: deep_reasoning  │ Complexity: high
+# copilot  →  gpt-5.5
+
+ag route "write pytest unit tests and mock the database" --format json
+# {"purpose": "testing", "capability_class": "coding", "complexity": "medium", ...}
+
 # Visualize the call graph as an interactive HTML report
 ag graph                               # Generate code-graph.html, open in browser
 ag graph --output reports/graph.html   # Custom output path
@@ -220,6 +250,7 @@ agentra/
 ├── hooks/           # Git hook management + CI template generation
 ├── plugin/          # Claude Code plugin generator
 ├── optimizer/       # Token optimization (dedup, prioritize, compress, budget-fit)
+├── routing/         # RouteSmith task classifier + model router
 ├── adapters/        # Agent platform adapters (7 platforms)
 ├── skills/          # Domain skill packs (14 built-in)
 ├── execution/       # Execution safety engine (risk classify, sandbox, approve)
@@ -308,6 +339,107 @@ ag hooks ci --ci gitlab --output .gitlab-ci.yml
 ```
 
 Scanner degrades gracefully — `bandit`, `semgrep`, `pip-audit`, `npm audit`, and `cargo audit` are all optional. The built-in OWASP regex scanner works with no extra dependencies.
+
+## Intelligent Instruction Merging
+
+When you run `ag init` or `ag model set` on a project that already has instruction files, Agentra **merges** the new content instead of overwriting:
+
+- **Agentra-owned sections** (`## Detected Stack`, `## Security & Governance`, `## Active Skills`, etc.) are always refreshed with the latest generated content.
+- **User-added `## ` sections** are preserved verbatim in their original position.
+- The Agentra header (preamble) is always updated to the latest version.
+- Non-markdown files (`.aider.conf.yml`, `.continue/config.json`) are always replaced since they use structured formats.
+
+```bash
+# Safe to re-run — your custom sections are preserved
+ag init
+
+# Force a clean overwrite (no merge)
+# (use write_agent_files(..., merge=False) in Python API)
+```
+
+## Smart Model Routing (RouteSmith Mode)
+
+Instead of letting Copilot's "auto" mode pick any model, Agentra classifies each task and routes it to the capability-matched model before the agent responds.
+
+```bash
+ag route "implement a distributed caching layer with Redis"
+# Purpose: coding │ Capability: coding │ Complexity: high
+# Upgraded to deep_reasoning — high-complexity signals detected.
+#
+# Recommended Models:
+#   copilot  →  gpt-5.5        (deep_reasoning)
+#   claude   →  claude-opus-4-7
+#   cursor   →  claude-4-7
+
+ag route "fix the typo in the README" --platform copilot
+# Purpose: general │ Capability: balanced │ Complexity: low
+# copilot  →  gpt-5.4
+```
+
+### How it works
+
+1. **`TaskClassifier`** scores 9 purpose categories (planning, reasoning, review, coding, testing, refactoring, documentation, general, formatting) using weighted keyword signals — zero latency, no ML required.
+2. **Complexity estimation** upgrades `coding` → `deep_reasoning` when high-complexity signals appear (`production`, `distributed`, `architecture`, `multi-tenant`, etc.).
+3. **`TaskRouter`** resolves the best model per platform using `CAPABILITY_MODELS` + `CAPABILITY_FALLBACK_CHAINS`, respecting per-purpose config overrides and enterprise model restrictions.
+4. **Decision table injected** into every agent instruction file as a `## Smart Model Routing` section — agents self-select the right model before responding.
+
+```yaml
+# .agentra.yml — override routing decisions per purpose
+model_purpose_preferences:
+  copilot:
+    review: gpt-5.5        # Always use deep model for security review
+    formatting: gpt-5-mini # Use fast model for style fixes
+```
+
+```bash
+# Restrict unavailable models (enterprise plan limits)
+# TaskRouter skips restricted models and picks the next best from the fallback chain
+```
+
+| Signal Group | Key Phrases | Capability | Example Model (Copilot) |
+|---|---|---|---|
+| Planning | "architect", "design", "roadmap" | `deep_reasoning` | `gpt-5.5` |
+| Reasoning | "analyze", "compare", "tradeoff" | `deep_reasoning` | `gpt-5.5` |
+| Code Review | "review", "audit", "vulnerability" | `deep_reasoning` | `gpt-5.5` |
+| Implementation | "implement", "write", "fix" | `coding` | `gpt-5.3-codex` |
+| Testing | "test", "mock", "pytest" | `coding` | `gpt-5.3-codex` |
+| Documentation | "document", "readme", "docstring" | `balanced` | `gpt-5.4` |
+| Formatting | "format", "lint", "ruff" | `fast` | `gpt-5.4` |
+
+## Skills as Agent-Invokable Prompts
+
+Skills are no longer just static text injected into every instruction file. Each skill is now materialized as a **standalone prompt file** that agents load on demand:
+
+| Platform | File | How to invoke |
+|----------|------|---------------|
+| **GitHub Copilot** | `.github/prompts/<skill>.prompt.md` | Type `#<skill>` in chat |
+| **Claude Code** | `.claude/skills/<skill>/SKILL.md` | Type `/skill <skill>` |
+
+This keeps instruction files lean (only the active skills table is injected) while giving the model full, targeted guidance exactly when it's needed.
+
+```bash
+# Generate prompt files for all active skills
+ag skills generate
+
+# Generate for specific skills
+ag skills generate --skills fastapi,postgresql,kubernetes
+
+# List all skills with active status
+ag skills list
+
+# Skip one platform
+ag skills generate --no-claude    # Copilot only
+ag skills generate --no-copilot   # Claude Code only
+```
+
+The `## Active Skills` block in every instruction file tells agents how to invoke each skill:
+
+```markdown
+## Active Skills
+| Skill       | Copilot    | Claude Code      | Description                    |
+|-------------|------------|------------------|--------------------------------|
+| **fastapi** | `#fastapi` | `/skill fastapi` | Production FastAPI patterns... |
+```
 
 ## Claude Code Plugin
 
@@ -444,7 +576,7 @@ Full interactive documentation is available at [`docs/index.html`](docs/index.ht
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (211 tests)
+# Run tests (288 tests)
 pytest tests/ -v
 
 # Lint
