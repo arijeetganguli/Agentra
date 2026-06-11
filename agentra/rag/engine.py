@@ -1,19 +1,18 @@
-"""CodeRAGEngine — TF-IDF + cosine similarity retrieval over the code knowledge graph.
+"""CodeRAGEngine — BM25 retrieval over the code knowledge graph.
 
 Chunks are sourced from the SQLite index (CodeIndexEngine) so no separate file
-traversal is needed.  The fitted TF-IDF vectorizer and sparse matrix are
-persisted to disk so subsequent queries are near-instant.
+traversal is needed.  The fitted BM25 index and metadata are persisted to disk
+so subsequent queries are near-instant.
 
-scikit-learn and numpy are optional enterprise dependencies.  Every public
-method degrades gracefully when they are missing, returning empty results with
-a clear installation hint.
+rank_bm25 is a required dependency (pure Python, zero ML dependencies).
+Every public method degrades gracefully when it is missing, returning empty
+results with a clear installation hint.
 """
 
 from __future__ import annotations
 
-import io
 import pickle
-import time
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,33 +22,45 @@ from agentra.rag.patterns import AntiPatternLibrary
 if TYPE_CHECKING:
     from agentra.index.engine import CodeIndexEngine
 
-_ENTERPRISE_HINT = (
-    "scikit-learn and numpy are required for RAG. "
-    "Install them with: pip install agentra[enterprise]"
+_BM25_HINT = (
+    "rank_bm25 is required for RAG search. "
+    "Install it with: pip install agentra[rag]"
 )
 
-_SIMILARITY_THRESHOLD = 0.92  # AP-011 duplicate-chunk threshold
+_SIMILARITY_THRESHOLD = 0.92  # AP-011 duplicate-chunk threshold (Jaccard)
 
 
-def _require_sklearn():
+def _tokenize(text: str) -> list[str]:
+    """Word tokenizer that preserves dotted names (e.g. os.path)."""
+    return re.findall(r"\b\w[\w.]*\b", text.lower())
+
+
+def _require_bm25():
     try:
-        from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore[import]
-        from sklearn.metrics.pairwise import cosine_similarity  # type: ignore[import]
-        import numpy as np  # type: ignore[import]
-        return TfidfVectorizer, cosine_similarity, np
+        from rank_bm25 import BM25Okapi  # type: ignore[import]
+        return BM25Okapi
     except ImportError as e:
-        raise ImportError(_ENTERPRISE_HINT) from e
+        raise ImportError(_BM25_HINT) from e
+
+
+def _jaccard(text_a: str, text_b: str) -> float:
+    """Token-level Jaccard similarity — used for AP-011 duplicate-chunk detection."""
+    toks_a = set(_tokenize(text_a))
+    toks_b = set(_tokenize(text_b))
+    if not toks_a or not toks_b:
+        return 0.0
+    return len(toks_a & toks_b) / len(toks_a | toks_b)
 
 
 class CodeRAGEngine:
     """
-    TF-IDF retrieval engine over code chunks from the knowledge graph.
+    BM25 retrieval engine over code chunks from the knowledge graph.
 
     Usage::
 
         rag = CodeRAGEngine(store_path=Path(".agentra"), index_engine=engine)
-        rag.build()                          # fit on all indexed chunks
-        results = rag.find_similar(code_text, top_k=5)
+        rag.build()                          # build BM25 index from indexed chunks
+        results = rag.find_similar(query, top_k=5)
         antipatterns = rag.detect_antipatterns(code_text, "myfile.py")
     """
 
@@ -59,39 +70,31 @@ class CodeRAGEngine:
         self._index = index_engine
         self._library = AntiPatternLibrary()
 
-        self._vectorizer_path = store_path / "rag_vectorizer.pkl"
-        self._matrix_path = store_path / "rag_matrix.npz"
+        self._bm25_path = store_path / "rag_bm25.pkl"
         self._meta_path = store_path / "rag_meta.pkl"
 
-        self._vectorizer = None
-        self._matrix = None
+        self._bm25 = None
         self._meta: list[tuple[str, int, str]] = []  # (file_path, start_line, symbol_name)
+        self._texts: list[str] = []  # raw chunk texts for Jaccard (AP-011)
 
     # ── Persistence ───────────────────────────────────────────────────────
 
     def _save(self) -> None:
-        TfidfVectorizer, _, np = _require_sklearn()
-        with open(self._vectorizer_path, "wb") as f:
-            pickle.dump(self._vectorizer, f)
-        buf = io.BytesIO()
-        from scipy.sparse import save_npz  # type: ignore[import]
-        save_npz(buf, self._matrix)
-        self._matrix_path.write_bytes(buf.getvalue())
+        with open(self._bm25_path, "wb") as f:
+            pickle.dump(self._bm25, f, protocol=pickle.HIGHEST_PROTOCOL)
         with open(self._meta_path, "wb") as f:
-            pickle.dump(self._meta, f)
+            pickle.dump((self._meta, self._texts), f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _load(self) -> bool:
-        """Try to load from disk. Returns True on success."""
-        if not (self._vectorizer_path.exists() and self._matrix_path.exists() and self._meta_path.exists()):
+        """Try to load BM25 index from disk. Returns True on success."""
+        if not (self._bm25_path.exists() and self._meta_path.exists()):
             return False
         try:
-            _require_sklearn()  # ensure sklearn/numpy are available
-            from scipy.sparse import load_npz  # type: ignore[import]
-            with open(self._vectorizer_path, "rb") as f:
-                self._vectorizer = pickle.load(f)  # noqa: S301
-            self._matrix = load_npz(self._matrix_path)
+            _require_bm25()  # ensure rank_bm25 is available
+            with open(self._bm25_path, "rb") as f:
+                self._bm25 = pickle.load(f)  # noqa: S301
             with open(self._meta_path, "rb") as f:
-                self._meta = pickle.load(f)  # noqa: S301
+                self._meta, self._texts = pickle.load(f)  # noqa: S301
             return True
         except Exception:  # noqa: BLE001
             return False
@@ -100,13 +103,13 @@ class CodeRAGEngine:
 
     def build(self, force: bool = False) -> None:
         """
-        Fit the TF-IDF vectorizer over all indexed code chunks.
+        Build the BM25 index over all indexed code chunks.
 
-        Re-fit is always full (TF-IDF requires global IDF statistics).
-        For most codebases this completes in under one second.
+        Pure Python, no ML dependencies. Rebuilds are always full but
+        complete in well under one second for typical codebases.
         """
         try:
-            TfidfVectorizer, _, np = _require_sklearn()
+            BM25Okapi = _require_bm25()
         except ImportError:
             return  # degrade gracefully
 
@@ -124,18 +127,10 @@ class CodeRAGEngine:
             texts.append(text)
             meta.append((file_path, start_line, symbol_name))
 
-        vectorizer = TfidfVectorizer(
-            analyzer="word",
-            token_pattern=r"(?u)\b\w[\w.]*\b",  # keep dotted names (e.g. os.path)
-            max_features=50_000,
-            sublinear_tf=True,
-            min_df=1,
-        )
-        matrix = vectorizer.fit_transform(texts)
-
-        self._vectorizer = vectorizer
-        self._matrix = matrix
+        tokenized_corpus = [_tokenize(t) for t in texts]
+        self._bm25 = BM25Okapi(tokenized_corpus)
         self._meta = meta
+        self._texts = texts
 
         try:
             self._save()
@@ -143,17 +138,13 @@ class CodeRAGEngine:
             pass  # non-fatal; results are still in memory
 
     def update(self, changed_files: list[Path] | None = None) -> None:
-        """
-        Rebuild the RAG index.  TF-IDF always re-fits globally because
-        document frequencies cannot be updated incrementally, but the
-        cost is negligible for typical codebases.
-        """
+        """Rebuild the BM25 index (always full, fast)."""
         self.build(force=True)
 
     # ── Query API ─────────────────────────────────────────────────────────
 
     def _ensure_loaded(self) -> bool:
-        if self._vectorizer is not None:
+        if self._bm25 is not None:
             return True
         return self._load()
 
@@ -161,13 +152,14 @@ class CodeRAGEngine:
         """
         Find the top-k most similar code chunks to *code_text*.
 
-        Returns list of (file_path, start_line, cosine_similarity_score).
+        Returns list of (file_path, start_line, normalized_bm25_score).
+        Scores are normalized to [0, 1] relative to the top result.
         """
         if not code_text.strip():
             return []
 
         try:
-            _, cosine_similarity, np = _require_sklearn()
+            _require_bm25()
         except ImportError:
             return []
 
@@ -175,12 +167,23 @@ class CodeRAGEngine:
             return []
 
         try:
-            query_vec = self._vectorizer.transform([code_text])
-            scores = cosine_similarity(query_vec, self._matrix).flatten()
-            top_indices = np.argsort(scores)[::-1][:top_k]
+            query_tokens = _tokenize(code_text)
+            if not query_tokens:
+                return []
+
+            raw_scores = self._bm25.get_scores(query_tokens)
+            max_score = float(max(raw_scores)) if len(raw_scores) > 0 else 0.0
+            if max_score <= 0:
+                return []
+
+            # Normalize scores to [0, 1] relative to the top result
+            norm_scores = [float(s) / max_score for s in raw_scores]
+
+            # Sort by score descending, take top_k
+            scored = sorted(enumerate(norm_scores), key=lambda x: x[1], reverse=True)[:top_k]
+
             results = []
-            for idx in top_indices:
-                score = float(scores[idx])
+            for idx, score in scored:
                 if score < 0.1:
                     break
                 file_path, start_line, _symbol = self._meta[idx]
@@ -192,33 +195,36 @@ class CodeRAGEngine:
     def detect_antipatterns(self, code_text: str, file_path: str, language: str = "python") -> list[AntiPattern]:
         """
         Detect anti-patterns in *code_text* using the pattern library,
-        plus duplicate-chunk detection (AP-011) via TF-IDF similarity.
+        plus duplicate-chunk detection (AP-011) via Jaccard token similarity.
         """
         findings = self._library.scan(code_text, file_path, language)
 
-        # AP-011: duplicate chunk detection
-        try:
-            _, cosine_similarity, np = _require_sklearn()
-            if self._ensure_loaded():
-                query_vec = self._vectorizer.transform([code_text])
-                scores = cosine_similarity(query_vec, self._matrix).flatten()
-                top_score = float(np.max(scores)) if len(scores) > 0 else 0.0
-                top_idx = int(np.argmax(scores))
-                similar_file, similar_line, _ = self._meta[top_idx] if self._meta else ("", 0, "")
-                # Only flag if it's a different location
-                if top_score >= _SIMILARITY_THRESHOLD and similar_file != file_path:
-                    findings.append(AntiPattern(
-                        pattern_id="AP-011",
-                        name="duplicate-chunk",
-                        severity=Severity.MEDIUM,
-                        description=f"High similarity ({top_score:.0%}) with {similar_file}:{similar_line}.",
-                        suggestion="Extract duplicated logic into a shared utility function or base class.",
-                        file_path=file_path,
-                        line=1,
-                        context=f"Similar to {similar_file}:{similar_line}",
-                    ))
-        except Exception:  # noqa: BLE001
-            pass
+        # AP-011: duplicate chunk detection via token-level Jaccard similarity
+        if self._ensure_loaded() and self._texts:
+            try:
+                best_score = 0.0
+                best_idx = 0
+                for i, chunk_text in enumerate(self._texts):
+                    score = _jaccard(code_text, chunk_text)
+                    if score > best_score:
+                        best_score = score
+                        best_idx = i
+
+                if best_score >= _SIMILARITY_THRESHOLD and self._meta:
+                    similar_file, similar_line, _ = self._meta[best_idx]
+                    if similar_file != file_path:
+                        findings.append(AntiPattern(
+                            pattern_id="AP-011",
+                            name="duplicate-chunk",
+                            severity=Severity.MEDIUM,
+                            description=f"High similarity ({best_score:.0%}) with {similar_file}:{similar_line}.",
+                            suggestion="Extract duplicated logic into a shared utility function or base class.",
+                            file_path=file_path,
+                            line=1,
+                            context=f"Similar to {similar_file}:{similar_line}",
+                        ))
+            except Exception:  # noqa: BLE001
+                pass
 
         return findings
 

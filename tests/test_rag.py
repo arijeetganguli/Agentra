@@ -168,11 +168,11 @@ class TestAntiPatternLibrary:
 
 
 class TestCodeRAGEngine:
-    """Integration tests — require scikit-learn. Skipped if absent."""
+    """Integration tests — require rank_bm25. Skipped if absent."""
 
     @pytest.fixture(autouse=True)
-    def _skip_without_sklearn(self):
-        pytest.importorskip("sklearn", reason="scikit-learn not installed")
+    def _skip_without_bm25(self):
+        pytest.importorskip("rank_bm25", reason="rank_bm25 not installed")
 
     def _make_engine(self, project_root: Path):
         from agentra.index.engine import CodeIndexEngine
@@ -197,8 +197,7 @@ class TestCodeRAGEngine:
             rag = CodeRAGEngine(idx_dir, idx)
             rag.build(force=True)
 
-        assert (idx_dir / "rag_vectorizer.pkl").exists()
-        assert (idx_dir / "rag_matrix.npz").exists()
+        assert (idx_dir / "rag_bm25.pkl").exists()
         assert (idx_dir / "rag_meta.pkl").exists()
 
     def test_find_similar_returns_tuples(self, python_project: Path):
@@ -296,8 +295,8 @@ class TestCodeRAGEngine:
         ids = [f.pattern_id for f in findings]
         assert "AP-007" in ids
 
-    def test_graceful_degradation_without_sklearn(self, python_project: Path):
-        """find_similar returns [] when sklearn is unavailable — never raises."""
+    def test_graceful_degradation_without_bm25(self, python_project: Path):
+        """find_similar returns [] when rank_bm25 is unavailable — never raises."""
         from agentra.index.engine import CodeIndexEngine
         from agentra.rag.engine import CodeRAGEngine
 
@@ -307,7 +306,7 @@ class TestCodeRAGEngine:
             idx.build(python_project)
             rag = CodeRAGEngine(idx_dir, idx)
 
-        with patch("agentra.rag.engine._require_sklearn", side_effect=ImportError("no sklearn")):
+        with patch("agentra.rag.engine._require_bm25", side_effect=ImportError("no rank_bm25")):
             results = rag.find_similar("anything", top_k=5)
 
         assert results == []
@@ -329,7 +328,7 @@ class TestCodeRAGEngine:
             loaded = rag2._load()
 
         assert loaded is True
-        assert rag2._vectorizer is not None
+        assert rag2._bm25 is not None
 
 
 # ── Adapter block helpers ─────────────────────────────────────────────────────

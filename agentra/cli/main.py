@@ -748,6 +748,334 @@ def version():
     console.print(f"Agentra v{__version__}")
 
 
+# ── ag token-saver ───────────────────────────────────────────────────────────
+
+_token_saver_app = typer.Typer(
+    name="token-saver",
+    help="Token-saving mode: compress context files, guide RTK/caveman setup.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(_token_saver_app, name="token-saver")
+
+_BREVITY_BLOCK = """\
+\n<!-- agentra-token-saver-begin -->
+## Token-Saver Mode — Active
+- Omit preambles, summaries, and closing remarks
+- Use fragments over full sentences where meaning is clear
+- Skip "Here's how to fix it" intros — give the fix directly
+- No "please note" / "make sure to" / "in order to" filler
+- File refs: use `path/file.py#L42` format, never prose descriptions
+- Code explanations: one line max per block unless explicitly asked
+<!-- agentra-token-saver-end -->
+"""
+
+_RTK_BLOCK = """\
+\n<!-- agentra-rtk-begin -->
+## RTK (Rust Token Killer) — Shell Output Compression
+RTK filters shell command output before it enters context (60-90% savings).
+Docs: https://github.com/rtk-ai/rtk
+Windows: download rtk-x86_64-pc-windows-msvc.zip from releases, add to PATH.
+Usage: prefix commands with `rtk` — `rtk pytest`, `rtk git status`, `rtk ls .`
+Key commands: rtk git diff | rtk pytest | rtk docker ps | rtk aws ...
+<!-- agentra-rtk-end -->
+"""
+
+_TOKEN_SAVER_FLAG = ".agentra/token_saver.json"
+_CONTEXT_FILES = [
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".github/copilot-instructions.md",
+]
+
+
+def _marker_present(text: str, marker: str) -> bool:
+    return f"<!-- agentra-{marker}-begin -->" in text
+
+
+def _run_compress_context(root: Path) -> list[tuple[str, int, int]]:
+    """Run ContextCompressor on all context files. Returns list of (file, orig, comp)."""
+    from agentra.compress.engine import ContextCompressor
+
+    compressor = ContextCompressor()
+    results = []
+    backup_dir = root / ".agentra" / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    for rel in _CONTEXT_FILES:
+        fpath = root / rel
+        if not fpath.exists():
+            continue
+        # Always back up first
+        bak = backup_dir / (rel.replace("/", "_").replace("\\", "_") + ".bak")
+        bak.write_bytes(fpath.read_bytes())
+        orig_tokens, comp_tokens, compressed = compressor.compress_file(fpath)
+        fpath.write_text(compressed, encoding="utf-8")
+        results.append((rel, orig_tokens, comp_tokens))
+
+    return results
+
+
+@_token_saver_app.command(name="on")
+def token_saver_on(
+    path: str = typer.Argument(None, help="Project root (default: cwd)"),
+) -> None:
+    """Enable token-saver mode: compress context files and inject brevity block."""
+    import json as json_mod
+    import datetime
+
+    root = _resolve_root(path)
+    agentra_dir = root / ".agentra"
+    agentra_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Compress context files
+    with console.status("[bold green]Compressing context files..."):
+        savings = _run_compress_context(root)
+
+    if savings:
+        table = Table(title="Context Compression", show_header=True)
+        table.add_column("File", style="cyan")
+        table.add_column("Before (tokens)", justify="right")
+        table.add_column("After (tokens)", justify="right")
+        table.add_column("Saved", justify="right")
+        for rel, orig, comp in savings:
+            pct = round((orig - comp) / orig * 100) if orig > 0 else 0
+            table.add_row(rel, str(orig), str(comp), f"[green]-{pct}%[/]")
+        console.print(table)
+
+    # 2. Inject brevity block into copilot-instructions.md (Copilot is in-context)
+    copilot_file = root / ".github" / "copilot-instructions.md"
+    if copilot_file.exists():
+        content = copilot_file.read_text(encoding="utf-8")
+        if not _marker_present(content, "token-saver"):
+            copilot_file.write_text(content + _BREVITY_BLOCK, encoding="utf-8")
+            console.print("[green]✓[/] Brevity block added to .github/copilot-instructions.md")
+
+    # 3. Write mode flag
+    flag_path = root / _TOKEN_SAVER_FLAG
+    flag_path.write_text(json_mod.dumps({
+        "enabled": True,
+        "enabled_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "files_compressed": [r for r, _, _ in savings],
+    }, indent=2), encoding="utf-8")
+
+    console.print(Panel(
+        "[bold green]Token-saver mode ON[/]\n"
+        "Context files compressed. Brevity block active for Copilot.\n"
+        "Run [bold]ag token-saver status[/] to see savings summary.\n"
+        "Run [bold]ag token-saver off[/] to restore original files.",
+        title="✓ Token-Saver",
+    ))
+
+
+@_token_saver_app.command(name="off")
+def token_saver_off(
+    path: str = typer.Argument(None, help="Project root (default: cwd)"),
+) -> None:
+    """Disable token-saver mode and restore original context files from backups."""
+    root = _resolve_root(path)
+    backup_dir = root / ".agentra" / "backups"
+    flag_path = root / _TOKEN_SAVER_FLAG
+
+    restored = []
+    if backup_dir.exists():
+        for rel in _CONTEXT_FILES:
+            bak = backup_dir / (rel.replace("/", "_").replace("\\", "_") + ".bak")
+            if bak.exists():
+                target = root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(bak.read_bytes())
+                bak.unlink()
+                restored.append(rel)
+
+    if flag_path.exists():
+        flag_path.unlink()
+
+    if restored:
+        console.print(f"[green]✓[/] Restored: {', '.join(restored)}")
+    console.print("[dim]Token-saver mode OFF.[/]")
+
+
+@_token_saver_app.command(name="compress-context")
+def token_saver_compress(
+    path: str = typer.Argument(None, help="Project root (default: cwd)"),
+    files: str = typer.Option(None, "--files", "-f", help="Comma-separated list of files to compress (default: all context files)"),
+) -> None:
+    """Compress context files (CLAUDE.md, AGENTS.md, copilot-instructions.md) to save tokens.
+
+    Backs up originals to .agentra/backups/ before modifying.
+    """
+    from agentra.compress.engine import ContextCompressor
+
+    root = _resolve_root(path)
+    compressor = ContextCompressor()
+    backup_dir = root / ".agentra" / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    targets = [root / f.strip() for f in files.split(",")] if files else [root / r for r in _CONTEXT_FILES]
+    targets = [t for t in targets if t.exists()]
+
+    if not targets:
+        console.print("[yellow]No context files found to compress.[/]")
+        return
+
+    table = Table(title="Context Compression", show_header=True)
+    table.add_column("File", style="cyan")
+    table.add_column("Before (tokens)", justify="right")
+    table.add_column("After (tokens)", justify="right")
+    table.add_column("Reduction", justify="right")
+
+    for fpath in targets:
+        bak = backup_dir / (str(fpath.relative_to(root)).replace("/", "_").replace("\\", "_") + ".bak")
+        bak.write_bytes(fpath.read_bytes())
+        orig_tokens, comp_tokens, compressed = compressor.compress_file(fpath)
+        fpath.write_text(compressed, encoding="utf-8")
+        pct = round((orig_tokens - comp_tokens) / orig_tokens * 100) if orig_tokens > 0 else 0
+        table.add_row(str(fpath.relative_to(root)), str(orig_tokens), str(comp_tokens), f"[green]-{pct}%[/]")
+
+    console.print(table)
+    console.print(f"[dim]Backups saved to {backup_dir}[/]")
+
+
+@_token_saver_app.command(name="status")
+def token_saver_status(
+    path: str = typer.Argument(None, help="Project root (default: cwd)"),
+) -> None:
+    """Show token-saver mode status and estimated session savings."""
+    import json as json_mod
+
+    root = _resolve_root(path)
+    flag_path = root / _TOKEN_SAVER_FLAG
+    backup_dir = root / ".agentra" / "backups"
+
+    is_on = flag_path.exists()
+    console.print(f"Token-saver mode: {'[bold green]ON[/]' if is_on else '[dim]OFF[/]'}")
+
+    if is_on:
+        try:
+            meta = json_mod.loads(flag_path.read_text(encoding="utf-8"))
+            console.print(f"  Enabled at: [dim]{meta.get('enabled_at', 'unknown')}[/]")
+            compressed = meta.get("files_compressed", [])
+            if compressed:
+                console.print(f"  Files compressed: {', '.join(compressed)}")
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Show current token counts for context files
+    from agentra.compress.engine import ContextCompressor
+    compressor = ContextCompressor()
+    table = Table(title="Current Context File Sizes", show_header=True)
+    table.add_column("File", style="cyan")
+    table.add_column("Tokens (current)", justify="right")
+    table.add_column("Backup exists", justify="right")
+
+    for rel in _CONTEXT_FILES:
+        fpath = root / rel
+        if not fpath.exists():
+            continue
+        tokens = compressor.estimate_tokens(fpath.read_text(encoding="utf-8", errors="ignore"))
+        bak = backup_dir / (rel.replace("/", "_").replace("\\", "_") + ".bak")
+        has_bak = "[green]✓[/]" if bak.exists() else "[dim]no[/]"
+        table.add_row(rel, str(tokens), has_bak)
+
+    console.print(table)
+
+    if not is_on:
+        console.print("\n[dim]Run [bold]ag token-saver on[/] to enable.[/]")
+
+
+@_token_saver_app.command(name="init-rtk")
+def token_saver_init_rtk(
+    path: str = typer.Argument(None, help="Project root (default: cwd)"),
+) -> None:
+    """Show RTK (Rust Token Killer) setup instructions and inject usage hints into CLAUDE.md."""
+    import platform
+
+    root = _resolve_root(path)
+    is_windows = platform.system() == "Windows"
+
+    if is_windows:
+        install_instructions = (
+            "Windows install:\n"
+            "  1. Download rtk-x86_64-pc-windows-msvc.zip from:\n"
+            "     https://github.com/rtk-ai/rtk/releases/latest\n"
+            "  2. Extract and add rtk.exe to PATH\n"
+            "  3. In your terminal: rtk init -g\n\n"
+            "  WSL (recommended for full hook support):\n"
+            "    curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh\n"
+            "    rtk init -g"
+        )
+    else:
+        install_instructions = (
+            "Install:\n"
+            "  curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh\n\n"
+            "  Or via Homebrew:\n"
+            "    brew install rtk\n\n"
+            "  Then: rtk init -g"
+        )
+
+    console.print(Panel(
+        f"[bold]RTK — Rust Token Killer[/]\n"
+        f"CLI proxy that reduces LLM token consumption 60-90% on common dev commands.\n"
+        f"GitHub: https://github.com/rtk-ai/rtk\n\n"
+        f"{install_instructions}\n\n"
+        f"[cyan]Key RTK commands:[/]\n"
+        f"  rtk pytest          # -90% test output\n"
+        f"  rtk git status      # -80% git output\n"
+        f"  rtk git diff        # -75% diff output\n"
+        f"  rtk ls .            # -80% directory listing\n"
+        f"  rtk docker ps       # -80% container list\n"
+        f"  rtk gain            # show token savings stats",
+        title="RTK Setup",
+    ))
+
+    # Inject RTK block into CLAUDE.md
+    claude_md = root / "CLAUDE.md"
+    if claude_md.exists():
+        content = claude_md.read_text(encoding="utf-8")
+        if not _marker_present(content, "rtk"):
+            claude_md.write_text(content + _RTK_BLOCK, encoding="utf-8")
+            console.print("[green]✓[/] RTK usage hints added to CLAUDE.md")
+    else:
+        console.print("[dim]CLAUDE.md not found — RTK hints not injected.[/]")
+
+
+@_token_saver_app.command(name="caveman")
+def token_saver_caveman(
+    path: str = typer.Argument(None, help="Project root (default: cwd)"),
+) -> None:
+    """Show caveman skill setup and inject brevity block into copilot-instructions.md."""
+    root = _resolve_root(path)
+
+    console.print(Panel(
+        "[bold]Caveman — Output Token Compression Skill[/]\n"
+        "Cuts ~65-75% of output tokens by making the agent respond in telegraphic style.\n"
+        "GitHub: https://github.com/JuliusBrussee/caveman\n\n"
+        "[cyan]Install (Node ≥18 required):[/]\n"
+        "  # macOS / Linux / WSL / Git Bash\n"
+        "  curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash\n\n"
+        "  # Windows (PowerShell)\n"
+        "  irm https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.ps1 | iex\n\n"
+        "[cyan]Activate per session:[/]  /caveman\n"
+        "[cyan]Compress CLAUDE.md: [/]  /caveman-compress CLAUDE.md\n"
+        "[cyan]Session stats:      [/]  /caveman-stats\n\n"
+        "[dim]Caveman only affects output tokens. Brain still big. Mouth small.[/]",
+        title="Caveman Setup",
+    ))
+
+    # Inject brevity block into copilot-instructions.md if not already present
+    copilot_file = root / ".github" / "copilot-instructions.md"
+    if copilot_file.exists():
+        content = copilot_file.read_text(encoding="utf-8")
+        if not _marker_present(content, "token-saver"):
+            copilot_file.write_text(content + _BREVITY_BLOCK, encoding="utf-8")
+            console.print("[green]✓[/] Brevity block added to .github/copilot-instructions.md")
+        else:
+            console.print("[dim]Brevity block already present in copilot-instructions.md.[/]")
+    else:
+        console.print("[dim].github/copilot-instructions.md not found — brevity block not injected.[/]")
+
+
 # ── ag index ─────────────────────────────────────────────────────────────────
 
 @app.command(name="index")
@@ -757,7 +1085,7 @@ def index_cmd(
     force: bool = typer.Option(False, "--force", help="Rebuild index from scratch even for unchanged files"),
     output_format: str = typer.Option("table", "--format", "-f", help="Output format: table or json"),
 ):
-    """Build (or update) the persistent code knowledge graph and TF-IDF RAG index."""
+    """Build (or update) the persistent code knowledge graph and BM25 RAG index."""
     import json as json_mod
 
     root = _resolve_root(path)

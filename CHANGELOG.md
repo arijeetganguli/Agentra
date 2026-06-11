@@ -5,6 +5,19 @@ All notable changes to Agentra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] — 2026-06-11
+
+### Added
+- `agentra/compress/engine.py` — new `ContextCompressor` for context-file compression, filler stripping, blank-line collapse, and RAG chunk deduplication
+- `agentra/cli/main.py` — new `ag token-saver` command group with `on`, `off`, `compress-context`, `status`, `init-rtk`, and `caveman`
+- `tests/test_compress.py` — coverage for token estimation, markdown compression rules, and chunk deduplication
+
+### Changed
+- `agentra/rag/engine.py` — replace TF-IDF retrieval with BM25 via `rank-bm25`; use token-level Jaccard for duplicate chunk detection
+- `agentra/optimizer/engine.py` — use `tiktoken` when available for more accurate token estimation, with safe fallback behavior
+- `pyproject.toml` — add core `rank-bm25` dependency and new optional `tokens` and `rag` extras
+- Total tests: **304 passed, 1 skipped**
+
 ## [0.4.1] — 2026-05-31
 
 ### Fixed

@@ -18,6 +18,17 @@ class TestTokenEstimation:
         long = _estimate_tokens("this is a much longer piece of text that should have more tokens")
         assert long > short
 
+    def test_estimate_fallback_when_tiktoken_missing(self):
+        """Should fall back to len//4 without raising when tiktoken is absent."""
+        import agentra.optimizer.engine as _eng
+        orig = _eng._TIKTOKEN_ENC
+        try:
+            _eng._TIKTOKEN_ENC = False  # simulate absent tiktoken
+            result = _estimate_tokens("hello world this is a test")
+            assert result >= 1
+        finally:
+            _eng._TIKTOKEN_ENC = orig
+
 
 class TestTokenOptimizer:
     def test_deduplicate_rules(self):

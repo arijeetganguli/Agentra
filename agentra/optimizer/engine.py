@@ -9,8 +9,24 @@ from agentra.governance.policies import PolicyRule
 from agentra.models import OptimizationResult, StackProfile, TokenBudget
 
 
+# Cached tiktoken encoder — False means tiktoken is not installed
+_TIKTOKEN_ENC: object = None
+
+
 def _estimate_tokens(text: str) -> int:
-    """Rough token estimation: ~4 chars per token for English text."""
+    """Token estimation using tiktoken (cl100k_base) when available, else len//4."""
+    global _TIKTOKEN_ENC
+    if _TIKTOKEN_ENC is None:
+        try:
+            import tiktoken  # type: ignore[import]
+            _TIKTOKEN_ENC = tiktoken.get_encoding("cl100k_base")
+        except Exception:  # noqa: BLE001
+            _TIKTOKEN_ENC = False
+    if _TIKTOKEN_ENC is not False:
+        try:
+            return max(1, len(_TIKTOKEN_ENC.encode(text)))  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
     return max(1, len(text) // 4)
 
 
