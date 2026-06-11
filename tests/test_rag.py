@@ -575,6 +575,24 @@ class TestCliInitModel:
         # Should show model preferences table in output
         assert "Model Preferences" in result.output
 
+    def test_init_token_saver_mode_enables_token_saver(self, tmp_path: Path):
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "m"\n')
+        result = runner.invoke(app, ["init", str(tmp_path), "--mode", "token-saver", "--agents", "copilot"])
+
+        assert result.exit_code == 0
+
+        loaded = load_config(tmp_path)
+        assert loaded is not None
+        assert loaded.karpathy_guidelines is False
+        assert loaded.rag_config.include_in_agent_files is False
+
+        flag_path = tmp_path / ".agentra" / "token_saver.json"
+        assert flag_path.exists()
+
+        content = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
+        assert "agentra-token-saver-begin" in content
+        assert "## Karpathy Coding Guidelines (Universal — All Code Writing)" not in content
+
     def test_model_block_in_copilot_instructions(self, tmp_path: Path):
         (tmp_path / "pyproject.toml").write_text('[project]\nname = "m"\n')
         runner.invoke(app, ["init", str(tmp_path), "--agents", "copilot"])

@@ -30,7 +30,7 @@ def _resolve_root(path: str | None) -> Path:
 @app.command()
 def init(
     path: str = typer.Argument(None, help="Project root (default: cwd)"),
-    mode: str = typer.Option("quick", "--mode", "-m", help="Onboarding mode: quick, guided, enterprise, ci"),
+    mode: str = typer.Option("quick", "--mode", "-m", help="Onboarding mode: quick, guided, enterprise, ci, token-saver"),
     agents: str = typer.Option(None, "--agents", "-a", help="Comma-separated agents: claude,cursor,copilot,aider,windsurf"),  # noqa: E501
     model: str = typer.Option("auto", "--model", "-M", help="Model for all agents (e.g. claude-sonnet-4-6, gpt-5.5) or 'auto'"),  # noqa: E501
 ):
@@ -98,6 +98,9 @@ def init(
     optimizer = TokenOptimizer(config.token_budget)
     agent_files = generate_for_agents(config.agents, config, stack, governance, optimizer)
     written = write_agent_files(root, agent_files)
+
+    if onboarding_mode == OnboardingMode.TOKEN_SAVER:
+        _enable_token_saver_mode(root, emit_panel=False)
 
     console.print(f"\n[green]✓[/] Generated {len(written)} agent file(s):")
     for f in written:
@@ -816,19 +819,13 @@ def _run_compress_context(root: Path) -> list[tuple[str, int, int]]:
     return results
 
 
-@_token_saver_app.command(name="on")
-def token_saver_on(
-    path: str = typer.Argument(None, help="Project root (default: cwd)"),
-) -> None:
-    """Enable token-saver mode: compress context files and inject brevity block."""
-    import json as json_mod
+def _enable_token_saver_mode(root: Path, *, emit_panel: bool = True) -> list[tuple[str, int, int]]:
     import datetime
+    import json as json_mod
 
-    root = _resolve_root(path)
     agentra_dir = root / ".agentra"
     agentra_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Compress context files
     with console.status("[bold green]Compressing context files..."):
         savings = _run_compress_context(root)
 
@@ -843,7 +840,6 @@ def token_saver_on(
             table.add_row(rel, str(orig), str(comp), f"[green]-{pct}%[/]")
         console.print(table)
 
-    # 2. Inject brevity block into copilot-instructions.md (Copilot is in-context)
     copilot_file = root / ".github" / "copilot-instructions.md"
     if copilot_file.exists():
         content = copilot_file.read_text(encoding="utf-8")
@@ -851,7 +847,6 @@ def token_saver_on(
             copilot_file.write_text(content + _BREVITY_BLOCK, encoding="utf-8")
             console.print("[green]✓[/] Brevity block added to .github/copilot-instructions.md")
 
-    # 3. Write mode flag
     flag_path = root / _TOKEN_SAVER_FLAG
     flag_path.write_text(json_mod.dumps({
         "enabled": True,
@@ -859,13 +854,25 @@ def token_saver_on(
         "files_compressed": [r for r, _, _ in savings],
     }, indent=2), encoding="utf-8")
 
-    console.print(Panel(
-        "[bold green]Token-saver mode ON[/]\n"
-        "Context files compressed. Brevity block active for Copilot.\n"
-        "Run [bold]ag token-saver status[/] to see savings summary.\n"
-        "Run [bold]ag token-saver off[/] to restore original files.",
-        title="✓ Token-Saver",
-    ))
+    if emit_panel:
+        console.print(Panel(
+            "[bold green]Token-saver mode ON[/]\n"
+            "Context files compressed. Brevity block active for Copilot.\n"
+            "Run [bold]ag token-saver status[/] to see savings summary.\n"
+            "Run [bold]ag token-saver off[/] to restore original files.",
+            title="✓ Token-Saver",
+        ))
+
+    return savings
+
+
+@_token_saver_app.command(name="on")
+def token_saver_on(
+    path: str = typer.Argument(None, help="Project root (default: cwd)"),
+) -> None:
+    """Enable token-saver mode: compress context files and inject brevity block."""
+    root = _resolve_root(path)
+    _enable_token_saver_mode(root)
 
 
 @_token_saver_app.command(name="off")

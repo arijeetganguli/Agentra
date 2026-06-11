@@ -41,6 +41,9 @@ def detect_and_build_config(project_root: Path, mode: OnboardingMode = Onboardin
         skills=[c.name for c in stack.all_components if c.confidence >= 0.6],
     )
 
+    config.karpathy_guidelines = True
+    config.scanner_enabled = True
+
     # Apply mode-specific defaults
     if mode == OnboardingMode.ENTERPRISE:
         config.security_mode = SecurityMode.ENTERPRISE
@@ -52,6 +55,11 @@ def detect_and_build_config(project_root: Path, mode: OnboardingMode = Onboardin
     elif mode == OnboardingMode.CI:
         config.minimal_context = True
         config.token_budget = TokenBudget(input_limit=8000, output_limit=3000, reserved_system=1500)
+    elif mode == OnboardingMode.TOKEN_SAVER:
+        config.minimal_context = True
+        config.karpathy_guidelines = False
+        config.token_budget = TokenBudget(input_limit=6000, output_limit=2000, reserved_system=1000)
+        config.rag_config.include_in_agent_files = False
 
     # Auto-detect agents
     for agent_file, platform in [
@@ -67,10 +75,6 @@ def detect_and_build_config(project_root: Path, mode: OnboardingMode = Onboardin
     # Default to Claude + Copilot if none detected
     if not config.agents:
         config.agents = [AgentPlatform.CLAUDE, AgentPlatform.COPILOT]
-
-    # Karpathy guidelines on by default for all modes
-    config.karpathy_guidelines = True
-    config.scanner_enabled = True
 
     # Auto-select recommended models for each detected agent platform
     for agent in config.agents:

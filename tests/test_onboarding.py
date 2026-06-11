@@ -21,6 +21,16 @@ class TestOnboarding:
         assert config.project_name == project.name
         assert config.security_mode == SecurityMode.STANDARD
 
+    def test_token_saver_mode(self, project: Path):
+        config = detect_and_build_config(project, OnboardingMode.TOKEN_SAVER)
+        assert config.security_mode == SecurityMode.STANDARD
+        assert config.minimal_context is True
+        assert config.karpathy_guidelines is False
+        assert config.token_budget.input_limit == 6000
+        assert config.token_budget.output_limit == 2000
+        assert config.token_budget.reserved_system == 1000
+        assert config.rag_config.include_in_agent_files is False
+
     def test_enterprise_mode(self, project: Path):
         config = detect_and_build_config(project, OnboardingMode.ENTERPRISE)
         assert config.security_mode == SecurityMode.ENTERPRISE

@@ -5,6 +5,17 @@ All notable changes to Agentra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] — 2026-06-11
+
+### Added
+- `agentra/models.py` / `agentra/onboarding/engine.py` / `agentra/cli/main.py` — new `token-saver` onboarding mode for `ag init --mode token-saver`
+- `tests/test_onboarding.py` / `tests/test_rag.py` — coverage for token-saver onboarding defaults and CLI activation
+
+### Changed
+- `ag init --mode token-saver` now generates leaner instruction files, disables Karpathy guidelines and in-file RAG patterns, and enables token-saver immediately after generation
+- `README.md` — cleaned up token-saver onboarding documentation and updated test totals
+- Total tests: **306 passed, 1 skipped**
+
 ## [0.4.3] — 2026-06-11
 
 ### Added

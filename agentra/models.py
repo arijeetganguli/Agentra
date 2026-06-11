@@ -66,6 +66,7 @@ class OnboardingMode(enum.StrEnum):
     GUIDED = "guided"
     ENTERPRISE = "enterprise"
     CI = "ci"
+    TOKEN_SAVER = "token-saver"
 
 
 # ── Stack Detection ─────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@
 Secure, govern, route, and optimize AI coding agents — automatically.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-288%20passed-3fb950)](tests/)
+[![Tests](https://img.shields.io/badge/tests-306%20passed-3fb950)](tests/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -18,7 +18,7 @@ Agentra is a DevSecOps control plane for AI coding assistants. It auto-detects y
 
 <table>
 <tr><td><strong>40+</strong> Technologies Detected</td><td><strong>32</strong> Security Policies</td><td><strong>14</strong> Built-in Skills</td></tr>
-<tr><td><strong>8</strong> Agent Platforms</td><td><strong>5</strong> Compliance Frameworks</td><td><strong>22</strong> CLI Commands</td></tr>
+<tr><td><strong>8</strong> Agent Platforms</td><td><strong>5</strong> Compliance Frameworks</td><td><strong>24</strong> CLI Commands</td></tr>
 </table>
 
 ## Quick Start
@@ -29,6 +29,9 @@ pip install agentra
 
 # Initialize — auto-detect stack, generate agent instruction files
 ag init --mode quick
+
+# Minimal-token setup — generate lean instructions and turn token-saver on in one step
+ag init --mode token-saver --agents copilot
 
 # Run security vulnerability scan (OWASP Top 10 + SAST + CVE)
 ag scan
@@ -55,6 +58,10 @@ ag benchmark
 ag skills list
 ag skills generate
 
+# Enable token-saver mode for leaner instruction files
+ag token-saver on
+ag token-saver status
+
 # Classify a task and route to the best model (RouteSmith mode)
 ag route "implement a distributed caching layer with Redis"
 ag route "design the authentication system architecture" --platform copilot
@@ -72,7 +79,7 @@ ag route "review this code for security vulnerabilities" --format json
 | 🪝 **Git Hooks** | Auto-install pre-commit (OWASP scan) and pre-push (full scan) hooks with clean install/uninstall |
 | 🔌 **Claude Code Plugin** | Distributable plugin package with PreToolUse hook, 4 skills, and Karpathy coding guidelines |
 | 🧩 **Skills System** | 14 domain skills materialized as agent-invokable `.prompt.md` (Copilot) and `SKILL.md` (Claude Code) files — load guidance on demand instead of bloating every instruction file |
-| 📦 **Token Optimization** | Deduplicate, prioritize, compress, and budget-fit instructions — 30-60% token savings |
+| 📦 **Token Optimization** | Deduplicate, prioritize, compress, and budget-fit instructions; `ag token-saver` compresses generated context files, and optional `tiktoken` support improves token estimates |
 | 🤖 **Smart Model Routing** | RouteSmith-style dynamic task classification routes each request to the capability-matched model. `TaskClassifier` scores 9 purpose categories with weighted keyword signals; high-complexity tasks auto-upgrade to `deep_reasoning`. Decision tables injected into all agent instruction files. `ag route "<task>"` for live classification. |
 | 🔌 **Agent Adapters** | Native instruction files for Claude, Cursor, Copilot, Aider, Windsurf, Continue.dev, Roo Code, and universal AGENTS.md |
 | ⚙ **Execution Safety** | Risk-classify commands, block destructive patterns, sandbox with approval gates, dry-run mode |
@@ -88,8 +95,9 @@ ag route "review this code for security vulnerabilities" --format json
 | `ag enforce` | Run security policies against codebase, report violations with risk scoring |
 | `ag scan` | Vulnerability scan: OWASP Top 10 patterns, SAST (bandit/semgrep), dependency CVEs |
 | `ag scan --incremental` | Incremental scan — only files changed since last `ag index` run |
-| `ag index` | Build/update the persistent code knowledge graph and TF-IDF RAG index |
+| `ag index` | Build/update the persistent code knowledge graph and BM25 RAG index |
 | `ag patterns` | Detect code smells and anti-patterns using the knowledge graph |
+| `ag rag "<query>"` | Search the indexed codebase for similar code before writing new code |
 | `ag prebuild <cmd>` | Security gate — scan then run build command only if no CRITICAL findings |
 | `ag hooks <action>` | Manage git hooks (install/uninstall/status) and generate CI templates |
 | `ag plugin` | Generate a Claude Code plugin package with skills and PreToolUse hook |
@@ -111,6 +119,7 @@ ag route "review this code for security vulnerabilities" --format json
 | `ag route "<task>"` | Classify a task and show the best model per platform (RouteSmith mode) |
 | `ag route "<task>" --platform <p>` | Route for a single platform (e.g. `copilot`, `claude`) |
 | `ag route "<task>" --format json` | Machine-readable routing decision |
+| `ag token-saver <action>` | Compress context files, enable token-saver mode, and print RTK/caveman setup guidance |
 | `ag audit` | View local audit log of all Agentra actions |
 | `ag doctor` | Health check: verify config, agent files, .gitignore |
 | `ag version` | Display version |
@@ -125,6 +134,7 @@ ag init --mode enterprise --agents claude,copilot
 ag index                            # Full index build
 ag index --force                    # Force rebuild from scratch
 ag index --format json              # Machine-readable output
+ag rag "database connection pooling"  # Find similar code with BM25 retrieval
 
 # Detect code smells and anti-patterns
 ag patterns                         # Whole project (requires ag index)
@@ -167,6 +177,13 @@ ag validate
 #   Governance:  4 violations │ Risk: 29.0 │ Blast Radius: high
 #   Compliance:  SOC2: 3 findings │ PCI_DSS: 2 findings
 #   Optimization: 3,840 → 2,112 tokens (45.0% reduction)
+
+# Token-saver controls after init
+ag token-saver on
+ag token-saver status
+ag token-saver compress-context
+ag token-saver init-rtk
+ag token-saver caveman
 
 # Smart model routing — view and manage per-agent model preferences
 ag model list                          # Show active model + 9-purpose routing table
@@ -246,7 +263,8 @@ agentra/
 ├── governance/      # Security policy engine (32 rules, 8 categories)
 ├── scanner/         # Vulnerability scanning: OWASP patterns, SAST, deps CVE
 ├── index/           # Persistent code knowledge graph (SQLite + tree-sitter)
-├── rag/             # TF-IDF RAG engine + anti-pattern library (12 patterns)
+├── rag/             # BM25 RAG engine + anti-pattern library (12 patterns)
+├── compress/        # Context-file compressor and RAG chunk deduplicator
 ├── hooks/           # Git hook management + CI template generation
 ├── plugin/          # Claude Code plugin generator
 ├── optimizer/       # Token optimization (dedup, prioritize, compress, budget-fit)
@@ -254,7 +272,7 @@ agentra/
 ├── adapters/        # Agent platform adapters (7 platforms)
 ├── skills/          # Domain skill packs (14 built-in)
 ├── execution/       # Execution safety engine (risk classify, sandbox, approve)
-├── onboarding/      # Project initialization (4 modes)
+├── onboarding/      # Project initialization (5 modes)
 ├── compliance/      # Compliance mapping (SOC2, ISO27001, PCI DSS, HIPAA, NIST)
 ├── benchmarks/      # Skill benchmarking with before/after metrics
 ├── renderers/       # HTML + Markdown report generation
@@ -271,6 +289,7 @@ agentra/
 | `guided` | Strict | All 5 frameworks | 12k / 4k / 2k | Interactive comprehensive |
 | `enterprise` | Enterprise | SOC2 + ISO27001 | 16k / 6k / 3k | Production deployments |
 | `ci` | Standard | — | 8k / 3k / 1.5k | CI/CD pipelines |
+| `token-saver` | Standard | — | 6k / 2k / 1k | Minimal-token coding with lean instruction files and token-saver enabled |
 
 ## Benchmarking & Reports
 
@@ -473,11 +492,15 @@ These are embedded in `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions
 
 ## Enterprise Features
 
-Install the optional enterprise extras to unlock persistent code intelligence, incremental scanning, and project-specific RAG context:
+Install optional extras depending on how much code intelligence and token accounting you want:
 
 ```bash
 pip install "agentra[enterprise]"
+pip install "agentra[rag]"
 ```
+
+- `enterprise` adds the optional graph/index dependencies used for deeper code intelligence.
+- `rag` adds `tiktoken` for more accurate token estimation while keeping BM25 retrieval available.
 
 ### Code Knowledge Graph
 
@@ -492,20 +515,32 @@ The index stores:
 - All functions, classes, methods, and imports with line ranges and docstrings
 - Call edges between symbols for dependency and hotspot analysis
 - SHA-256 content hashes per file for change detection
-- Code chunks for TF-IDF retrieval
+- Code chunks for BM25 retrieval
 
 **Languages supported:** Python, JavaScript, TypeScript, Rust, Go, Java, Ruby, C, C++, C# (via tree-sitter), with regex-based fallback for all other file types.
 
 **Call graph extraction** uses the best available tool per language — pyan3 for whole-project Python analysis (cross-file, module-level calls), tree-sitter `call_expression` queries for all other supported languages. Both are optional and degrade gracefully if not installed. Import-only nodes and true orphans are filtered from the graph by default; pass `--include-orphans` to show them.
 
-### TF-IDF Code RAG
+### BM25 Code RAG
 
-The RAG engine builds a TF-IDF matrix (scikit-learn, 50,000 features, sublinear TF) over all indexed code chunks. When generating agent instruction files (`CLAUDE.md`, `.cursorrules`, etc.), Agentra injects a **Codebase Patterns** section with:
+The RAG engine builds a BM25 index over tokenized code chunks using `rank-bm25`. When generating agent instruction files (`CLAUDE.md`, `.cursorrules`, etc.), Agentra injects a **Codebase Patterns** section with:
 
 - **Established patterns** — the top-3 most prevalent idioms in the codebase
 - **Known code smells** — the 5 highest-severity anti-patterns to avoid repeating
 
 This gives coding agents targeted, project-specific context instead of generic boilerplate, reducing agent context tokens by ~60–80% in steady state.
+
+### Token-Saver Mode
+
+`ag token-saver` is the dedicated low-token workflow for generated instruction files:
+
+- `ag init --mode token-saver` generates leaner agent files up front and enables token-saver automatically.
+- `ag token-saver on` compresses `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md`, writes backups to `.agentra/backups/`, and injects a brevity block where appropriate.
+- `ag token-saver off` restores the original files from backup.
+- `ag token-saver status` shows whether the mode is enabled and how many tokens each tracked context file uses.
+- `ag token-saver init-rtk` and `ag token-saver caveman` print setup instructions for external token-reduction helpers and add usage blocks to the relevant instruction files.
+
+Use `ag init --mode token-saver` when you want the leanest default setup from the start. Use `ag token-saver on` when you want to compress an existing project after a normal init.
 
 ### Anti-Pattern Detection
 
@@ -523,7 +558,7 @@ This gives coding agents targeted, project-specific context instead of generic b
 | AP-008 | commented-code | 5+ consecutive comment lines |
 | AP-009 | todo-density | > 5 TODO/FIXME per file |
 | AP-010 | missing-type-hints | Public functions without annotations |
-| AP-011 | duplicate-chunk | TF-IDF cosine similarity > 0.92 |
+| AP-011 | duplicate-chunk | Token Jaccard overlap > 0.90 |
 | AP-012 | global-mutation | `global x` inside functions |
 
 ```bash
@@ -576,7 +611,7 @@ Full interactive documentation is available at [`docs/index.html`](docs/index.ht
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (288 tests)
+# Run tests (306 passed, 1 skipped)
 pytest tests/ -v
 
 # Lint
