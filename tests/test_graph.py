@@ -157,3 +157,39 @@ class TestGraphCmd:
         # Should succeed and note truncation
         assert result.exit_code == 0
         assert out_html.exists()
+
+    def test_graph_falls_back_to_symbols_when_edges_missing(self, tmp_path):
+        pytest.importorskip("agentra.index.engine")
+
+        src = tmp_path / "mymod.py"
+        src.write_text(
+            "class Greeter:\n"
+            "    def greet(self, name: str) -> str:\n"
+            "        return f'Hello {name}'\n\n"
+            "def main():\n"
+            "    g = Greeter()\n"
+            "    print(g.greet('world'))\n",
+            encoding="utf-8",
+        )
+
+        idx_result = runner.invoke(app, ["index", str(tmp_path)])
+        assert idx_result.exit_code == 0
+
+        from agentra.index.engine import CodeIndexEngine
+
+        with CodeIndexEngine(tmp_path / ".agentra") as idx:
+            idx._conn.execute("DELETE FROM edges")
+            idx._conn.commit()
+
+        out_html = tmp_path / "graph.html"
+        result = runner.invoke(app, [
+            "graph", str(tmp_path),
+            "--output", str(out_html),
+            "--no-open",
+        ])
+
+        assert result.exit_code == 0
+        assert "Nodes: 0" not in result.output
+        assert out_html.exists()
+        content = out_html.read_text(encoding="utf-8")
+        assert "Greeter" in content or "greet" in content

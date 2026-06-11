@@ -5,6 +5,12 @@ All notable changes to Agentra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] — 2026-06-11
+
+### Fixed
+- `agentra/cli/main.py` — `ag graph` no longer renders an empty graph when a project has indexed symbols but no resolved call edges; it now falls back to showing non-import symbols and reports that no connected edges were found.
+- `tests/test_graph.py` — add regression coverage for repos whose graph index contains symbols but zero edges.
+
 ## [0.4.6] — 2026-06-11
 
 ### Changed

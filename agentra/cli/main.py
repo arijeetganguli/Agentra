@@ -1421,12 +1421,21 @@ def graph_cmd(
         sym["in_degree"] = in_degree.get(sym["id"], 0)
         sym["out_degree"] = out_degree.get(sym["id"], 0)
 
-    # Filter: by default drop import nodes and true orphans (no edges at all)
+    orphan_fallback = False
+
+    # Filter: by default drop import nodes and true orphans (no edges at all).
+    # If that would empty the graph entirely, fall back to showing non-import
+    # symbols so repos without resolved call edges still render useful nodes.
     if not include_orphans:
-        id_to_sym = {
+        filtered_syms = {
             k: v for k, v in id_to_sym.items()
             if v["kind"] != "import" and (v["in_degree"] > 0 or v["out_degree"] > 0)
         }
+        if filtered_syms:
+            id_to_sym = filtered_syms
+        elif id_to_sym:
+            id_to_sym = {k: v for k, v in id_to_sym.items() if v["kind"] != "import"} or id_to_sym
+            orphan_fallback = True
 
     # Cap nodes: prioritise by in-degree desc, then by kind (class > function > method > rest)
     kind_priority = {"class": 0, "function": 1, "method": 2, "variable": 3, "import": 4}
@@ -1451,6 +1460,7 @@ def graph_cmd(
         "hotspot_count": len({s["name"] for s in all_syms if s["in_degree"] >= 3 and not s["name"].startswith("__")}),
         "truncated": truncated,
         "max_nodes": max_nodes,
+        "orphan_fallback": orphan_fallback,
     }
 
     from agentra.renderers.graph_html import write_graph_html
@@ -1460,6 +1470,7 @@ def graph_cmd(
     console.print(Panel(
         f"[green]Call graph generated[/]\n"
         f"Nodes: [bold]{len(all_syms)}[/] | Edges: [bold]{len(kept_edges)}[/] | Files: [bold]{file_count}[/]"
+        + ("\n[yellow]No connected call edges found; showing symbols without edges[/]" if orphan_fallback else "")
         + (f"\n[yellow]Truncated to {max_nodes} nodes (total: {total_nodes}) — use --max-nodes to show more[/]" if truncated else ""),
         title="ag graph",
     ))
