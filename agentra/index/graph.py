@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from agentra.index.engine import CodeIndexEngine
 
@@ -65,7 +64,7 @@ class GraphQueryEngine:
     def find_hotspots(self, top_n: int = 10) -> list[tuple[str, str, int]]:
         """Return the top-N most-called symbols: (name, file_path, in_degree)."""
         G = self._load_graph()
-        nx = self._require_nx()
+        self._require_nx()
         ranked = sorted(G.in_degree(), key=lambda x: x[1], reverse=True)[:top_n]
         result = []
         for node_id, in_deg in ranked:

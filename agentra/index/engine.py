@@ -369,8 +369,6 @@ def _rebuild_edges_treesitter(
             # Sort by line_start desc so we can find the nearest enclosing scope
             sym_ranges_sorted = sorted(sym_ranges, key=lambda r: r[2])  # asc by start
 
-            source_lines = source.decode("utf-8", errors="ignore").splitlines()
-
             for node, tag in (captures if isinstance(captures, list) else captures.items() if hasattr(captures, "items") else []):
                 if isinstance(captures, dict):
                     # tree-sitter ≥0.22 returns dict[tag, list[Node]]
@@ -387,7 +385,7 @@ def _rebuild_edges_treesitter(
 
                     # Find innermost enclosing symbol
                     src_id = None
-                    for sym_id, sym_name, line_start, line_end in sym_ranges_sorted:
+                    for sym_id, _sym_name, line_start, line_end in sym_ranges_sorted:
                         if line_start <= call_line <= (line_end or 999999):
                             src_id = sym_id
 

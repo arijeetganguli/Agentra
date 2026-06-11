@@ -388,7 +388,7 @@ class BenchmarkRunner:
             f"Knowledge graph reduces scan scope from {n_all} to {n_changed} files "
             f"({_pct(n_all, n_changed):.0f}% skip rate), "
             f"{token_reduction:.0f}% fewer content tokens scanned."
-            + (f" Run 'ag index' for real measurements." if projected else "")
+            + (" Run 'ag index' for real measurements." if projected else "")
         )
 
         return SkillBenchmark(

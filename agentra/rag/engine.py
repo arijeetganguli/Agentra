@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentra.models import AntiPattern, RAGResult, Severity
+from agentra.models import AntiPattern, Severity
 from agentra.rag.patterns import AntiPatternLibrary
 
 if TYPE_CHECKING:
@@ -263,7 +263,7 @@ class CodeRAGEngine:
         all_findings: list[AntiPattern] = []
         seen: set[tuple[str, str, int]] = set()
 
-        for _cid, file_path, start_line, _symbol, text in chunks:
+        for _cid, file_path, _start_line, _symbol, text in chunks:
             for ap in self._library.scan(text, file_path):
                 key = (ap.pattern_id, file_path, ap.line)
                 if key not in seen:

@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 
 from agentra.models import (
     AGENT_PURPOSES,
-    CAPABILITY_FALLBACK_CHAINS,
     CAPABILITY_MODELS,
     PURPOSE_CAPABILITY_MAP,
     RouteResult,
@@ -214,7 +213,6 @@ class TaskRouter:
             config: Optional project config; if provided, respects
                     ``model_purpose_preferences`` overrides.
         """
-        from agentra.models import CAPABILITY_MODELS
 
         purpose, cap_class, complexity, scores = self._classifier.classify(task)
 
@@ -262,7 +260,7 @@ def build_routing_table(
     Respects purpose-level config overrides.  Used by the adapter to
     generate the static routing block embedded in instruction files.
     """
-    from agentra.models import CAPABILITY_MODELS, resolve_model_with_fallback
+    from agentra.models import resolve_model_with_fallback
 
     cap_models = CAPABILITY_MODELS.get(platform, {})
     if not cap_models:

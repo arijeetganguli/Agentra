@@ -4,7 +4,6 @@
 import pytest
 
 from agentra.adapters.agents import (
-    _AGENTRA_SECTIONS,
     _parse_md_sections,
     generate_for_agents,
     merge_instruction_content,

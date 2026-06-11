@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from agentra.models import RouteResult, TaskComplexity
 from agentra.routing.engine import (
@@ -145,9 +144,7 @@ class TestTaskRouter:
             assert model  # no empty strings
 
     def test_route_coding_task_uses_coding_model(self):
-        from agentra.models import CAPABILITY_MODELS
         result = self.router.route("implement a new API endpoint", platforms=["copilot"])
-        expected = CAPABILITY_MODELS["copilot"]["coding"]
         # May be upgraded to deep_reasoning if high complexity — just check not empty
         assert result.models["copilot"]
 
@@ -320,7 +317,7 @@ class TestRoutingBlockInAdapters:
     def test_routing_block_contains_all_purposes(self, tmp_path):
         from agentra.adapters.agents import CopilotAdapter
         from agentra.governance.engine import GovernanceEngine
-        from agentra.models import AGENT_PURPOSES, StackProfile
+        from agentra.models import StackProfile
         from agentra.optimizer.engine import TokenOptimizer
 
         config = self._make_config(tmp_path)

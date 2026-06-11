@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -124,7 +123,7 @@ class TestCompressFile:
         f = tmp_path / "case.md"
         f.write_text(content, encoding="utf-8")
         _, _, compressed = compressor.compress_file(f)
-        line = [l for l in compressed.splitlines() if l.strip()][0]
+        line = [line_text for line_text in compressed.splitlines() if line_text.strip()][0]
         # After stripping "Make sure to ", the first word should be capitalized
         content_part = line.lstrip("- ").strip()
         assert content_part[0].isupper() if content_part else True

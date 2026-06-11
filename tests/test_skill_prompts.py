@@ -1,6 +1,5 @@
 """Tests for the Skill Prompt Generator."""
 
-from pathlib import Path
 
 import pytest
 

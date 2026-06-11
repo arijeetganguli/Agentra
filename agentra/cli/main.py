@@ -621,7 +621,7 @@ def prebuild(
         )
         raise typer.Exit(result.returncode)
     except KeyboardInterrupt:
-        raise typer.Exit(130)
+        raise typer.Exit(130) from None
 
 
 # ── ag hooks ─────────────────────────────────────────────────────────────────
@@ -738,8 +738,8 @@ def plugin(
     ))
 
     console.print(
-        f"\n[dim]The plugin includes a PreToolUse hook that intercepts build commands "
-        f"and runs [bold]ag scan[/] automatically.[/]"
+        "\n[dim]The plugin includes a PreToolUse hook that intercepts build commands "
+        "and runs [bold]ag scan[/] automatically.[/]"
     )
 
 
@@ -1635,7 +1635,7 @@ def model_cmd(
         except ValueError:
             valid = ", ".join(p.value for p in AgentPlatform)
             console.print(f"[red]Unknown agent '{agent_name}'.[/] Valid: {valid}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
         if ag not in cfg.agents:
             console.print(
@@ -1664,7 +1664,7 @@ def model_cmd(
                     }
                     hint = f" [dim]({cap_hints[m]} class)[/]" if m in cap_hints else ""
                     console.print(f"  [cyan]{i}[/]. {m}{hint}")
-                raw = typer.prompt(f"\nEnter number or model name")
+                raw = typer.prompt("\nEnter number or model name")
                 if raw.isdigit():
                     idx = int(raw) - 1
                     if 0 <= idx < len(known):
@@ -1695,7 +1695,6 @@ def model_cmd(
                 model_name = fallback
             else:
                 choices_str = ", ".join(known)
-                fallback_chain = CAPABILITY_FALLBACK_CHAINS.get(ag.value, {}).get("balanced", [])
                 console.print(
                     f"[yellow]Warning:[/] '{model_name}' is not in the known list for {ag.value}.\n"
                     f"Known models: {choices_str}\n"

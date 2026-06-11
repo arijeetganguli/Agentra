@@ -379,7 +379,6 @@ def _build_routing_block(platform_value: str, config: ProjectConfig) -> str:
         "|-----------|-------------|------------|------------|",
     ]
 
-    seen_cap_models: dict[str, str] = {}  # capability_class → model (to deduplicate table)
     for purpose, model in table.items():
         label = _PURPOSE_LABELS.get(purpose, purpose.capitalize())
         signals = _PURPOSE_SIGNALS.get(purpose, "")

@@ -226,7 +226,6 @@ class AntiPatternLibrary:
         func_pattern = re.compile(r"^\s*(async\s+)?def\s+(\w+)\s*\(")
         func_start: int | None = None
         func_name = ""
-        base_indent = 0
         for i, line in enumerate(lines, 1):
             m = func_pattern.match(line)
             if m:
@@ -242,7 +241,6 @@ class AntiPatternLibrary:
                         ))
                 func_start = i
                 func_name = m.group(2)
-                base_indent = len(line) - len(line.lstrip())
         if func_start is not None:
             size = len(lines) - func_start + 1
             if size > 50:

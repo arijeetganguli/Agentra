@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -245,7 +244,7 @@ class TestScanEngine:
 
 class TestVulnPolicies:
     def test_vuln_policies_exist(self):
-        from agentra.governance.policies import ALL_POLICIES, VULNERABILITY_POLICIES
+        from agentra.governance.policies import VULNERABILITY_POLICIES
         assert len(VULNERABILITY_POLICIES) == 10
         vuln_ids = {p.id for p in VULNERABILITY_POLICIES}
         expected = {f"VULN-{i:03d}" for i in range(1, 11)}
