@@ -47,3 +47,4 @@ rag:
 model_preferences:
   claude: claude-sonnet-4-5
   copilot: gpt-4.1
+model_purpose_preferences: {}

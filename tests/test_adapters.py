@@ -93,6 +93,15 @@ class TestAdapters:
         assert "#fastapi" in claude_md
         assert "/skill fastapi" in claude_md
 
+    def test_generated_content_has_response_style_guidance(self, config, stack):
+        gov = GovernanceEngine(stack)
+        opt = TokenOptimizer()
+        files = generate_for_agents(config.agents, config, stack, gov, opt)
+        assert "## Response Style" in files["CLAUDE.md"]
+        assert "Use short flat bullets by default" in files["CLAUDE.md"]
+        assert "## Response Style" in files[".github/copilot-instructions.md"]
+        assert "## Response Style" in files["AGENTS.md"]
+
 
 class TestParseMdSections:
     def test_preamble_only(self):

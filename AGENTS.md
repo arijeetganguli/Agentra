@@ -34,6 +34,14 @@
 
 ## Testing Requirements
 
+### TDD Mandate — Always Follow Test-Driven Development
+**TDD is non-negotiable.** Every feature, fix, and refactor follows this cycle:
+1. **Red** — Write a failing test that defines the expected behaviour.
+2. **Green** — Write the minimum code to make it pass. Nothing more.
+3. **Refactor** — Clean up without breaking the test.
+
+Never write implementation code before a test exists for it.
+
 ### Mandatory Testing Workflow
 - **Always write tests** for any new or modified code before considering a task complete.
 - **Run the full relevant test suite** after every code change to catch regressions immediately.
@@ -114,10 +122,19 @@ ag index
 - Run `ag patterns` as a final check before marking a task complete.
 
 ## Active Skills
-- python
-- kubernetes
-- docker
-- github_actions
+
+Skills are agent-invokable — load targeted guidance on demand instead of embedding all content up-front.
+
+| Skill | Copilot | Claude Code | Description |
+|-------|---------|-------------|-------------|
+| python | — | — | (custom) |
+| **kubernetes** | `#kubernetes` | `/skill kubernetes` | Production Kubernetes patterns and security. |
+| docker | — | — | (custom) |
+| github_actions | — | — | (custom) |
+
+> Skill files live in `.github/prompts/<skill>.prompt.md` (Copilot) and `.claude/skills/<skill>/SKILL.md` (Claude Code).
+> Regenerate with: `ag skills generate`
+
 
 
 ## Execution Safety
@@ -125,3 +142,11 @@ ag index
 - Never execute code that modifies production data without approval
 - Sandbox all generated code execution
 - Create rollback scripts before schema changes
+## Response Style
+
+- Keep outputs brief and task-focused.
+- Use short flat bullets by default for non-trivial responses.
+- Include only the information required to act on the result.
+- Minimize commentary, repetition, and narrative status updates.
+- Avoid long explanations unless the user explicitly asks for detail.
+

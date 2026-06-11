@@ -5,6 +5,16 @@ All notable changes to Agentra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] — 2026-06-11
+
+### Added
+- `agentra/adapters/agents.py` — generated agent files now include a managed `Response Style` section that keeps outputs brief, uses short flat bullets, and reduces commentary.
+- `tests/test_adapters.py` — regression coverage for the new `Response Style` guidance in generated agent files.
+
+### Changed
+- `agentra/adapters/agents.py` — merge logic now treats `Response Style` as an Agentra-owned section so regeneration updates it without disturbing user-added sections.
+- `CLAUDE.md` / `AGENTS.md` / `.github/copilot-instructions.md` — regenerated to include the new response-style guidance.
+
 ## [0.4.4] — 2026-06-11
 
 ### Added

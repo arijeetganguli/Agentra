@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 # Any other ## heading in an existing file is treated as user content and preserved.
 _AGENTRA_SECTIONS: frozenset[str] = frozenset({
     "Model Preference",
+    "Response Style",
     "Karpathy Coding Guidelines (Universal — All Code Writing)",
     "Detected Stack",
     "Testing Requirements",
@@ -160,6 +161,18 @@ def _build_karpathy_block() -> str:
 - Transform tasks into verifiable goals with explicit success criteria.
 - For multi-step tasks, state a brief plan with verify steps before starting.
 - "Fix the bug" → "Write a test that reproduces it, then make it pass."
+"""
+
+
+def _build_response_style_block() -> str:
+    return """\
+## Response Style
+
+- Keep outputs brief and task-focused.
+- Use short flat bullets by default for non-trivial responses.
+- Include only the information required to act on the result.
+- Minimize commentary, repetition, and narrative status updates.
+- Avoid long explanations unless the user explicitly asks for detail.
 """
 
 
@@ -541,6 +554,7 @@ class ClaudeAdapter:
             _build_header("Claude Code (CLAUDE.md)"),
             _build_model_block(AgentPlatform.CLAUDE.value, config),
             _build_routing_block(AgentPlatform.CLAUDE.value, config),
+            _build_response_style_block(),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
@@ -564,6 +578,7 @@ class CursorAdapter:
             _build_header("Cursor (.cursorrules)"),
             _build_model_block(AgentPlatform.CURSOR.value, config),
             _build_routing_block(AgentPlatform.CURSOR.value, config),
+            _build_response_style_block(),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
@@ -587,6 +602,7 @@ class CopilotAdapter:
             _build_header("GitHub Copilot"),
             _build_model_block(AgentPlatform.COPILOT.value, config),
             _build_routing_block(AgentPlatform.COPILOT.value, config),
+            _build_response_style_block(),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
@@ -610,6 +626,7 @@ class AiderAdapter:
             _build_header("Aider (.aider.conf.yml)"),
             _build_model_block(AgentPlatform.AIDER.value, config),
             _build_routing_block(AgentPlatform.AIDER.value, config),
+            _build_response_style_block(),
             _build_stack_block(stack),
             _build_testing_block(stack),
             _build_security_block(governance, optimizer),
@@ -636,6 +653,7 @@ class WindsurfAdapter:
             _build_header("Windsurf"),
             _build_model_block(AgentPlatform.WINDSURF.value, config),
             _build_routing_block(AgentPlatform.WINDSURF.value, config),
+            _build_response_style_block(),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
@@ -658,9 +676,10 @@ class ContinueAdapter:
         import json
         instructions = governance.generate_instructions()
         compressed = optimizer.compress_instructions(instructions)
+        response_style = _build_response_style_block()
         patterns_block = _build_codebase_patterns_block(rag_engine) if config.rag_config.include_in_agent_files else ""
         rag_block = _build_rag_usage_block(config)
-        system_msg = "\n".join(p for p in [compressed, patterns_block, rag_block] if p)
+        system_msg = "\n".join(p for p in [response_style, compressed, patterns_block, rag_block] if p)
         model = config.model_preferences.get(AgentPlatform.CONTINUE.value, "")
         models_cfg = [{"title": model, "model": model, "provider": "ollama"}] if model else []
         cfg = {
@@ -680,6 +699,7 @@ class AgentsMdAdapter:
                  rag_engine: "CodeRAGEngine | None" = None) -> dict[str, str]:
         parts = [
             _build_header("AGENTS.md \u2014 Universal Agent Instructions"),
+            _build_response_style_block(),
             _build_karpathy_block() if config.karpathy_guidelines else "",
             _build_stack_block(stack),
             _build_testing_block(stack),
