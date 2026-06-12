@@ -278,9 +278,9 @@ class TestRoutingBlockInAdapters:
         files = CopilotAdapter().generate(config, stack, gov, opt)
         content = files[".github/copilot-instructions.md"]
 
-        assert "Smart Model Routing" in content
-        assert "RouteSmith" in content
-        assert "| Task Type |" in content
+        # Copilot now uses YAML frontmatter — routing is in modelRouting: key
+        assert "modelRouting:" in content
+        assert "planning:" in content
 
     def test_claude_adapter_contains_routing_table(self, tmp_path):
         from agentra.adapters.agents import ClaudeAdapter
@@ -328,16 +328,9 @@ class TestRoutingBlockInAdapters:
         files = CopilotAdapter().generate(config, stack, gov, opt)
         content = files[".github/copilot-instructions.md"]
 
-        # At least half the purpose labels should appear
-        purpose_labels = {
-            "planning": "Planning",
-            "review": "Review",
-            "coding": "Implementation",
-            "testing": "Testing",
-            "documentation": "Documentation",
-            "formatting": "Formatting",
-        }
-        matches = sum(1 for label in purpose_labels.values() if label in content)
+        # Copilot uses YAML modelRouting — check that key purposes appear as YAML keys
+        yaml_purposes = ["planning:", "review:", "testing:", "documentation:", "formatting:"]
+        matches = sum(1 for p in yaml_purposes if p in content)
         assert matches >= 4
 
     def test_routing_block_empty_for_unknown_platform(self):

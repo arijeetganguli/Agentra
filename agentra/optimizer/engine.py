@@ -81,9 +81,10 @@ class TokenOptimizer:
                 continue
             lines.append(f"\n## {severity} Rules")
             for item in groups[severity]:
-                # Shorten long instructions
-                if len(item) > 150:
-                    item = item[:147] + "..."
+                # Never truncate CRITICAL/HIGH rules — incomplete security rules are worse than none.
+                # Shorten MEDIUM and below to keep token usage reasonable.
+                if severity not in ("CRITICAL", "HIGH") and len(item) > 200:
+                    item = item[:197] + "..."
                 lines.append(f"- {item}")
 
         return "\n".join(lines)

@@ -330,8 +330,68 @@ Define success criteria. Loop until verified.
         policies=[],
         optimization_rules=["Always inject — universal, low token cost"],
     ),
-}
 
+    # ── Knowledge Graph Explorer ─────────────────────────────────────────────
+    "knowledge-graph": Skill(
+        id="knowledge-graph",
+        name="Knowledge Graph Explorer",
+        description="Build a mental model of the codebase using workspace search tools before writing code.",
+        stacks=["*"],
+        instructions="""## Knowledge Graph — Agent Workflow
+Before implementing any new function, class, or module:
+1. Use `semantic_search` to find semantically similar existing code.
+2. Use `grep_search` to find exact usages of related symbols.
+3. Use `file_search` to locate files by name or path pattern.
+4. Read the top 2-3 matching files to understand established patterns.
+5. Only proceed to implementation after understanding what already exists.
+
+Rules:
+- Never duplicate existing functionality found during exploration.
+- Reuse or extend existing helpers rather than writing new ones.
+- Match the coding style and patterns found in discovered files.""",
+        policies=[],
+        optimization_rules=["Always inject when rag_config.enabled"],
+    ),
+
+    # ── RAG Code Search ──────────────────────────────────────────────────────
+    "rag-search": Skill(
+        id="rag-search",
+        name="RAG Code Search",
+        description="Search for similar code before writing anything new — prevent duplication.",
+        stacks=["*"],
+        instructions="""## RAG Search — Before Writing New Code
+1. Describe what you want to build in 5-10 words.
+2. Run: `ag rag "<description>"` or use `semantic_search` in the workspace.
+3. Evaluate results:
+   - **High relevance (>0.8)**: Reuse or extend the existing code — do not duplicate.
+   - **Medium relevance (0.5-0.8)**: Review the match; adapt if patterns align.
+   - **Low relevance (<0.5)**: Proceed with new implementation, following project conventions.
+4. Reference the matched file and function in your implementation comments.""",
+        policies=[],
+        optimization_rules=["Always inject when rag_config.enabled"],
+    ),
+
+    # ── Code Pattern Checker ─────────────────────────────────────────────────
+    "code-patterns": Skill(
+        id="code-patterns",
+        name="Code Pattern Checker",
+        description="Detect anti-patterns and validate conventions before marking a task complete.",
+        stacks=["*"],
+        instructions="""## Code Pattern Check — Before Marking Complete
+Run before considering any task done:
+1. `ag patterns --severity high` — fail if any HIGH/CRITICAL smells introduced.
+2. Verify no rule from the Security & Governance section was violated.
+3. Confirm all touched files follow existing naming and structure conventions.
+4. Check that no imports, variables, or functions YOU added are now unused.
+
+Automatic checks:
+- Never introduce bare `except: pass` — always log with context.
+- Never add f-string SQL/shell construction — use parameterized queries.
+- Never hardcode credentials — use environment variables.""",
+        policies=["SEC-001"],
+        optimization_rules=["Always inject when rag_config.enabled"],
+    ),
+}
 
 # ── Skill Registry ───────────────────────────────────────────────────────────
 

@@ -27,12 +27,26 @@ def _resolve_root(path: str | None) -> Path:
 
 # ── ag init ──────────────────────────────────────────────────────────────────
 
+# All files written by ag init — ag init --force removes these before regenerating.
+_AGENTRA_MANAGED_FILES: list[str] = [
+    ".agentra.yml",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".cursorrules",
+    ".github/copilot-instructions.md",
+    ".aider.conf.yml",
+    ".windsurfrules",
+    ".continue/config.json",
+]
+
+
 @app.command()
 def init(
     path: str = typer.Argument(None, help="Project root (default: cwd)"),
     mode: str = typer.Option("quick", "--mode", "-m", help="Onboarding mode: quick, guided, enterprise, ci, token-saver"),
     agents: str = typer.Option(None, "--agents", "-a", help="Comma-separated agents: claude,cursor,copilot,aider,windsurf"),  # noqa: E501
     model: str = typer.Option("auto", "--model", "-M", help="Model for all agents (e.g. claude-sonnet-4-6, gpt-5.5) or 'auto'"),  # noqa: E501
+    force: bool = typer.Option(False, "--force", "-f", help="Remove all previous Agentra files and do a fresh setup (no merge)."),  # noqa: E501
 ):
     """Initialize Agentra for a project."""
     from agentra.adapters.agents import generate_for_agents, write_agent_files
@@ -44,6 +58,28 @@ def init(
 
     root = _resolve_root(path)
     onboarding_mode = OnboardingMode(mode)
+
+    if force:
+        removed: list[str] = []
+        for rel in _AGENTRA_MANAGED_FILES:
+            fp = root / rel
+            if fp.exists():
+                fp.unlink()
+                removed.append(rel)
+        for skill_dir, pattern in [
+            (root / ".github" / "prompts", "*.prompt.md"),
+            (root / ".claude" / "skills", "**/SKILL.md"),
+        ]:
+            if skill_dir.exists():
+                for fp in skill_dir.glob(pattern):
+                    fp.unlink()
+                    removed.append(str(fp.relative_to(root)))
+        if removed:
+            console.print(f"[yellow]⚡ Fresh setup:[/] removed {len(removed)} file(s)")
+            for r in removed:
+                console.print(f"  [dim]✗ {r}[/]")
+        else:
+            console.print("[dim]No previous Agentra files found — starting fresh.[/]")
 
     with console.status("[bold green]Detecting project stack..."):
         config = detect_and_build_config(root, onboarding_mode)
@@ -97,7 +133,7 @@ def init(
     governance = GovernanceEngine(stack)
     optimizer = TokenOptimizer(config.token_budget)
     agent_files = generate_for_agents(config.agents, config, stack, governance, optimizer)
-    written = write_agent_files(root, agent_files)
+    written = write_agent_files(root, agent_files, merge=not force)
 
     if onboarding_mode == OnboardingMode.TOKEN_SAVER:
         _enable_token_saver_mode(root, emit_panel=False)

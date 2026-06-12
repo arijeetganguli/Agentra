@@ -97,8 +97,10 @@ class TestAdapters:
         opt = TokenOptimizer()
         files = generate_for_agents(config.agents, config, stack, gov, opt)
         assert "## Response Style" in files["CLAUDE.md"]
-        assert "Use short flat bullets by default" in files["CLAUDE.md"]
-        assert "## Response Style" in files[".github/copilot-instructions.md"]
+        assert "Short flat bullets by default" in files["CLAUDE.md"]
+        # Copilot now uses YAML frontmatter — responseStyle is a YAML key
+        assert "responseStyle:" in files[".github/copilot-instructions.md"]
+        assert "tokenSaver: true" in files[".github/copilot-instructions.md"]
         assert "## Response Style" in files["AGENTS.md"]
 
 

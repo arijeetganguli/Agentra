@@ -6,28 +6,25 @@ project:
   sdks: []
   databases: []
 security:
-  mode: strict
+  mode: standard
   edr_safe: true
-  compliance:
-  - SOC2
-  - ISO27001
-  - PCI_DSS
-  - HIPAA
-  - NIST
+  compliance: []
 optimization:
   minimal_context: true
   token_budget:
-    input: 12000
-    output: 4000
+    input: 6000
+    output: 2000
 agents:
-- claude
 - copilot
 skills:
 - python
 - kubernetes
 - docker
 - github_actions
-karpathy_guidelines: true
+- knowledge-graph
+- rag-search
+- code-patterns
+karpathy_guidelines: false
 scanner_enabled: true
 index:
   path: .agentra
@@ -43,8 +40,17 @@ rag:
   enabled: true
   top_k: 5
   antipatterns: true
-  include_in_agent_files: true
+  include_in_agent_files: false
 model_preferences:
-  claude: claude-sonnet-4-5
-  copilot: gpt-4.1
-model_purpose_preferences: {}
+  copilot: gpt-5.4
+model_purpose_preferences:
+  copilot:
+    planning: gpt-5.5
+    reasoning: gpt-5.5
+    review: gpt-5.5
+    coding: gpt-5.3-codex
+    testing: gpt-5.3-codex
+    refactoring: gpt-5.3-codex
+    documentation: gpt-5.4
+    general: gpt-5.4
+    formatting: gpt-5.4

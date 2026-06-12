@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+import yaml
+
 from agentra.governance.engine import GovernanceEngine
 from agentra.models import AgentPlatform, ProjectConfig, StackProfile
 from agentra.optimizer.engine import TokenOptimizer
@@ -121,18 +123,33 @@ class AgentAdapter(Protocol):
 
 # ── Shared helpers ───────────────────────────────────────────────────────────
 
-def _build_header(platform_name: str) -> str:
+def _build_header(platform_name: str, *, frontmatter: bool = False) -> str:
+    if frontmatter:
+        return (
+            "---\n"
+            f"name: \"Agentra \u2014 {platform_name} Instructions\"\n"
+            "description: \"Project-wide guidelines and model routing\"\n"
+            "applyTo: \"**\"\n"
+            "---\n\n"
+            f"# Agentra \u2014 {platform_name} Instructions\n"
+            "<!-- Regenerate with: ag init -->\n\n"
+        )
     return (
-        f"# Agentra — {platform_name} Instructions\n"
-        f"# Auto-generated. Do not edit manually.\n"
-        f"# Regenerate with: ag init\n\n"
+        f"# Agentra \u2014 {platform_name} Instructions\n"
+        "<!-- Regenerate with: ag init -->\n\n"
     )
 
 
 def _build_security_block(governance: GovernanceEngine, optimizer: TokenOptimizer) -> str:
     instructions = governance.generate_instructions()
     compressed = optimizer.compress_instructions(instructions)
-    return f"## Security & Governance\n{compressed}\n"
+    return (
+        "## Security & Governance\n\n"
+        "Enforce all rules below unconditionally. Severity levels (CRITICAL > HIGH > MEDIUM) "
+        "indicate response urgency \u2014 violations at any level must be flagged and corrected "
+        "before task completion.\n"
+        + compressed + "\n"
+    )
 
 
 def _build_karpathy_block() -> str:
@@ -168,11 +185,16 @@ def _build_response_style_block() -> str:
     return """\
 ## Response Style
 
-- Keep outputs brief and task-focused.
-- Use short flat bullets by default for non-trivial responses.
-- Include only the information required to act on the result.
-- Minimize commentary, repetition, and narrative status updates.
-- Avoid long explanations unless the user explicitly asks for detail.
+<!-- agentra-token-saver-begin -->
+- Omit preambles, summaries, and closing remarks.
+- Use fragments over full sentences where meaning is clear.
+- Short flat bullets by default; no narrative status updates.
+- Skip "Here's how to fix it" intros \u2014 give the fix directly.
+- No "please note" / "make sure to" / "in order to" filler.
+- File refs: `path/file.py#L42` format, never prose descriptions.
+- Code explanations: one line max per block unless explicitly asked.
+- Expand only for complex multi-step work or when explicitly requested.
+<!-- agentra-token-saver-end -->
 """
 
 
@@ -193,10 +215,22 @@ def _build_stack_block(stack: StackProfile) -> str:
 
 
 def _build_skills_block(config: ProjectConfig) -> str:
-    if not config.skills:
+    from agentra.skills.registry import SkillRegistry
+
+    # Intelligence skills are auto-included when RAG is enabled, regardless of config.skills
+    _INTELLIGENCE_SKILLS = ["knowledge-graph", "rag-search", "code-patterns"]
+    intelligence_skills = _INTELLIGENCE_SKILLS if config.rag_config.enabled else []
+
+    all_skill_ids: list[str] = []
+    seen: set[str] = set()
+    for sid in list(config.skills) + intelligence_skills:
+        if sid not in seen:
+            seen.add(sid)
+            all_skill_ids.append(sid)
+
+    if not all_skill_ids:
         return ""
 
-    from agentra.skills.registry import SkillRegistry
     registry = SkillRegistry()
 
     lines = [
@@ -208,7 +242,7 @@ def _build_skills_block(config: ProjectConfig) -> str:
         "| Skill | Copilot | Claude Code | Description |",
         "|-------|---------|-------------|-------------|",
     ]
-    for skill_id in config.skills:
+    for skill_id in all_skill_ids:
         skill = registry.get(skill_id)
         if skill is None:
             lines.append(f"| {skill_id} | — | — | (custom) |")
@@ -591,26 +625,223 @@ class CursorAdapter:
 
 # ── GitHub Copilot Adapter ───────────────────────────────────────────────────
 
+def _build_copilot_yaml_frontmatter(
+    config: "ProjectConfig",
+    stack: "StackProfile",
+    governance: "GovernanceEngine",
+    optimizer: "TokenOptimizer",
+) -> str:
+    """Build the structured YAML frontmatter for .github/copilot-instructions.md."""
+    from agentra.models import AGENT_PURPOSES, KNOWN_MODELS, Severity
+    from agentra.routing.engine import build_routing_table
+    from agentra.skills.registry import SkillRegistry
+
+    platform = "copilot"
+    model = config.model_preferences.get(platform, "")
+    available_models = KNOWN_MODELS.get(platform, [])
+    routing_table = build_routing_table(platform, config)
+
+    # ── Detected stack ────────────────────────────────────────────────────────
+    languages = [c.name for c in stack.languages]
+    infrastructure = [c.name for c in stack.infrastructure]
+
+    # ── Security rules by severity ────────────────────────────────────────────
+    instructions = governance.generate_instructions()
+    critical: list[str] = []
+    high: list[str] = []
+    medium: list[str] = []
+    for inst in instructions:
+        m = re.match(r"\[(\w+)\]\s*(.*)", inst, re.DOTALL)
+        if not m:
+            medium.append(inst)
+            continue
+        sev, text = m.group(1).upper(), m.group(2).strip()
+        if sev == "CRITICAL":
+            critical.append(text)
+        elif sev == "HIGH":
+            high.append(text)
+        else:
+            medium.append(text)
+
+    # ── Active skills ─────────────────────────────────────────────────────────
+    _INTELLIGENCE_SKILLS = ["knowledge-graph", "rag-search", "code-patterns"]
+    all_skill_ids: list[str] = []
+    seen: set[str] = set()
+    for sid in list(config.skills) + (_INTELLIGENCE_SKILLS if config.rag_config.enabled else []):
+        if sid not in seen:
+            seen.add(sid)
+            all_skill_ids.append(sid)
+
+    registry = SkillRegistry()
+    active_skills: dict[str, dict] = {}
+    for sid in all_skill_ids:
+        skill = registry.get(sid)
+        if skill:
+            active_skills[sid] = {
+                "copilot": f"#{sid}",
+                "claudeCode": f"/skill {sid}",
+                "description": skill.description,
+            }
+        else:
+            active_skills[sid] = "custom"
+
+    # ── Test frameworks ───────────────────────────────────────────────────────
+    fw_map: dict[str, list[str]] = {}
+    lang_names = {c.name.lower() for c in stack.languages}
+    if "python" in lang_names:
+        fw_map["python"] = ["pytest"]
+    if "typescript" in lang_names or "javascript" in lang_names:
+        fw_map["javascriptTypescript"] = ["vitest", "jest"]
+
+    # ── Coding guidelines ─────────────────────────────────────────────────────
+    coding_guidelines: dict = {}
+    if config.karpathy_guidelines:
+        coding_guidelines = {
+            "thinkBeforeCoding": [
+                "State assumptions explicitly. If uncertain, ask — never guess silently.",
+                "Present multiple interpretations instead of picking one without disclosure.",
+                "If a simpler approach exists, say so and push back when warranted.",
+            ],
+            "simplicityFirst": [
+                "Write the minimum code that solves the problem. Nothing speculative.",
+                "No features beyond what was asked. No abstractions for single-use code.",
+                "If 200 lines could be 50, rewrite it.",
+            ],
+            "surgicalChanges": [
+                "Touch only what you must. Never improve adjacent code that wasn't in scope.",
+                "Every changed line must trace directly to the user's request.",
+                "Remove imports/vars/functions YOUR changes made unused — not pre-existing dead code.",
+            ],
+            "goalDrivenExecution": [
+                "Transform tasks into verifiable goals with explicit success criteria.",
+                "For multi-step tasks, state a brief plan with verify steps before starting.",
+            ],
+        }
+
+    # ── RAG / code intelligence ───────────────────────────────────────────────
+    code_intelligence: dict = {}
+    if config.rag_config.enabled:
+        code_intelligence = {
+            "consultKnowledgeGraphBeforeNewCode": True,
+            "beforeImplementing": [
+                'ag rag "<short description of what you want to build>"',
+                "ag patterns",
+            ],
+            "afterCompleting": [
+                "ag patterns --severity high",
+                "ag index",
+            ],
+            "rules": [
+                "If ag rag returns a similar chunk (high relevance), reuse or extend it — never duplicate.",
+                "Never introduce any pattern listed in the Known Code Smells section.",
+                "Run ag patterns as a final check before marking a task complete.",
+            ],
+        }
+
+    # ── Assemble YAML document ────────────────────────────────────────────────
+    doc: dict = {
+        "applyTo": "**",
+        "name": f"Agentra — {config.project_name} Instructions",
+        "description": "Project-wide guidelines and model routing",
+        "modelRouting": {p: routing_table.get(p, model) for p in AGENT_PURPOSES} if routing_table else {},
+        "responseStyle": {
+            "tokenSaver": True,
+            "omitPreambles": True,
+            "useFragments": True,
+            "skipIntros": True,
+            "avoidFiller": True,
+            "fileRefFormat": "path/file.py#L42",
+            "codeExplanations": "one-line-max",
+        },
+        "instructionScope": {
+            "behavioralInstructions": True,
+            "modelSelectionControlledByHost": True,
+            "routingTablesAreGuidance": True,
+            "responseStyleRulesMandatory": True,
+        },
+    }
+
+    if model:
+        doc["modelPreference"] = {
+            "activeModel": model,
+            "availableModels": available_models or [],
+            "changeCommand": "ag model set <platform> <model>",
+            "reinitializeCommand": "ag init --model <model>",
+        }
+
+    doc["responseGuidance"] = {
+        "identifyTaskTypeBeforeResponding": True,
+        "ifActiveModelDiffersPromptUserToSwitch": True,
+        "routeClassificationCommand": 'ag route "<task>"',
+        "note": "Model selection is controlled by the IDE host. If uncertain which model is active, state it at the start of your response.",
+    }
+
+    if languages or infrastructure:
+        doc["detectedStack"] = {}
+        if languages:
+            doc["detectedStack"]["languages"] = languages
+        if infrastructure:
+            doc["detectedStack"]["infrastructure"] = infrastructure
+
+    if coding_guidelines:
+        doc["codingGuidelines"] = coding_guidelines
+
+    doc["testingRequirements"] = {
+        "tddMandatory": True,
+        "cycle": ["red", "green", "refactor"],
+        "rules": [
+            "Always write tests for new or modified code before considering a task complete.",
+            "Run the full relevant test suite after every code change.",
+            "For bug fixes, write a test that reproduces the bug before writing the fix.",
+            "Keep tests fast, isolated, and deterministic. Mock external dependencies.",
+            "Never skip or disable failing tests to make a build pass — fix the root cause.",
+        ],
+        "recommendedFrameworks": fw_map or {"python": ["pytest"]},
+    }
+
+    if critical or high or medium:
+        doc["securityGovernance"] = {
+            "enforce": "unconditionally",
+            "severityLevels": "CRITICAL > HIGH > MEDIUM — violations must be flagged before task completion",
+        }
+        if critical:
+            doc["securityGovernance"]["criticalRules"] = critical
+        if high:
+            doc["securityGovernance"]["highRules"] = high
+        if medium:
+            doc["securityGovernance"]["mediumRules"] = medium
+
+    if code_intelligence:
+        doc["codeIntelligence"] = code_intelligence
+
+    if active_skills:
+        doc["activeSkills"] = active_skills
+
+    doc["skillGeneration"] = {
+        "promptsLocation": ".github/prompts/<skill>.prompt.md",
+        "claudeSkillsLocation": ".claude/skills/<skill>/SKILL.md",
+        "regenerateCommand": "ag skills generate",
+    }
+
+    yaml_body = yaml.dump(
+        doc,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+        width=120,
+        Dumper=yaml.Dumper,
+    )
+    return f"---\n{yaml_body}---\n"
+
+
 class CopilotAdapter:
     platform = AgentPlatform.COPILOT
 
     def generate(self, config: ProjectConfig, stack: StackProfile,
                  governance: GovernanceEngine, optimizer: TokenOptimizer,
                  rag_engine: "CodeRAGEngine | None" = None) -> dict[str, str]:
-        parts = [
-            _build_header("GitHub Copilot"),
-            _build_model_block(AgentPlatform.COPILOT.value, config),
-            _build_routing_block(AgentPlatform.COPILOT.value, config),
-            _build_response_style_block(),
-            _build_karpathy_block() if config.karpathy_guidelines else "",
-            _build_stack_block(stack),
-            _build_testing_block(stack),
-            _build_security_block(governance, optimizer),
-            _build_codebase_patterns_block(rag_engine) if config.rag_config.include_in_agent_files else "",
-            _build_rag_usage_block(config),
-            _build_skills_block(config),
-        ]
-        return {".github/copilot-instructions.md": "\n".join(p for p in parts if p)}
+        content = _build_copilot_yaml_frontmatter(config, stack, governance, optimizer)
+        return {".github/copilot-instructions.md": content}
 
 
 # ── Aider Adapter ────────────────────────────────────────────────────────────

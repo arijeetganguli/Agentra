@@ -2,31 +2,13 @@
 # Auto-generated. Do not edit manually.
 # Regenerate with: ag init
 
+## Response Style
 
-## Karpathy Coding Guidelines (Universal — All Code Writing)
-
-### 1. Think Before Coding
-- State assumptions explicitly. If uncertain, ask — never guess silently.
-- Present multiple interpretations instead of picking one without disclosure.
-- If a simpler approach exists, say so and push back when warranted.
-- Stop and name what's confusing rather than making assumptions.
-
-### 2. Simplicity First
-- Write the minimum code that solves the problem. Nothing speculative.
-- No features beyond what was asked. No abstractions for single-use code.
-- No "flexibility" that wasn't requested. No error handling for impossible scenarios.
-- If 200 lines could be 50, rewrite it.
-
-### 3. Surgical Changes
-- Touch only what you must. Never improve adjacent code that wasn't in scope.
-- Don't refactor things that aren't broken. Match existing style.
-- Every changed line must trace directly to the user's request.
-- Remove imports/vars/functions YOUR changes made unused — not pre-existing dead code.
-
-### 4. Goal-Driven Execution
-- Transform tasks into verifiable goals with explicit success criteria.
-- For multi-step tasks, state a brief plan with verify steps before starting.
-- "Fix the bug" → "Write a test that reproduces it, then make it pass."
+- Keep outputs brief and task-focused.
+- Use short flat bullets by default for non-trivial responses.
+- Include only the information required to act on the result.
+- Minimize commentary, repetition, and narrative status updates.
+- Avoid long explanations unless the user explicitly asks for detail.
 
 ## Detected Stack
 - **Languages**: python
@@ -53,7 +35,6 @@ Never write implementation code before a test exists for it.
 
 ### Recommended Test Frameworks (based on detected stack)
 - pytest (Python)
-
 
 ## Security & Governance
 
@@ -135,18 +116,8 @@ Skills are agent-invokable — load targeted guidance on demand instead of embed
 > Skill files live in `.github/prompts/<skill>.prompt.md` (Copilot) and `.claude/skills/<skill>/SKILL.md` (Claude Code).
 > Regenerate with: `ag skills generate`
 
-
-
 ## Execution Safety
 - Always dry-run destructive commands first
 - Never execute code that modifies production data without approval
 - Sandbox all generated code execution
 - Create rollback scripts before schema changes
-## Response Style
-
-- Keep outputs brief and task-focused.
-- Use short flat bullets by default for non-trivial responses.
-- Include only the information required to act on the result.
-- Minimize commentary, repetition, and narrative status updates.
-- Avoid long explanations unless the user explicitly asks for detail.
-

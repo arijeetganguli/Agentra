@@ -597,7 +597,8 @@ class TestCliInitModel:
         (tmp_path / "pyproject.toml").write_text('[project]\nname = "m"\n')
         runner.invoke(app, ["init", str(tmp_path), "--agents", "copilot"])
         content = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
-        assert "## Model Preference" in content
+        # Copilot now uses YAML frontmatter — model info is in YAML keys
+        assert "modelPreference:" in content
         assert AGENT_DEFAULT_MODELS["copilot"] in content
 
     def test_rag_usage_block_in_agents_md(self, tmp_path: Path):
